@@ -76,7 +76,7 @@ typedef unsigned short		uint16;
 /* somewhere to place the kernel state structure */
 #define KSTATEADDR	0x3000
 /* the address of the start of usable RAM and it's length in bytes */
-#define KRAMADDR	0x3000
+#define KRAMADDR	0x4000
 #define KRAMSIZE	(1024 * 1024 * 8)
 /* the size of a physical memory page */
 #define KPHYPAGESIZE		4096
@@ -265,8 +265,27 @@ void arm4_xrqenable_irq()
     arm4_cpsrset(arm4_cpsrget() & ~(1 << 7));
 }
 
-void arm4_loadtlb(uintptr base) {
+void arm4_tlbset0(uint32 base) {
 	asm("mcr p15, 0, %[tlb], c2, c0, 0" : : [tlb]"r" (base));
+}
+
+void arm4_tlbset1(uint32 base) {
+	asm("mcr p15, 0, %[tlb], c2, c0, 1" : : [tlb]"r" (base));
+}
+
+void arm4_tlbsetmode(uint32 val) {
+	asm("mcr p15, 0, %[tlb], c2, c0, 2" : : [tlb]"r" (val));
+}
+
+void arm4_tlbsetdom(uint32 val) {
+	asm("mcr p15, 0, %[val], c3, c0, 0" : : [val]"r" (val));
+}
+
+uint32 arm4_tlbenable() {
+	asm(" \
+			mrc p15, 0, r0, c1, c0, 0  \n\
+			orr r0, r0, #0x1 \n\
+			mcr p15, 0, r0, c1, c0, 0");
 }
 
 typedef struct _KTHREAD {
@@ -533,17 +552,53 @@ void thread1() {
 	}
 }
 
+/*
+	The TLB must be allocated on a 16-byte boundary.
+*/
+uint32 *kalloc1MBTLB() {
+	KSTATE			*ks;
+	uint32			*tlb;
+	int				x;
+	
+	ks = (KSTATE*)KSTATEADDR;
+	tlb = (uint32*)k_heapBMAllocBound(&ks->hphy, 1024 * 16, 14);  // 14
+	
+	if (!tlb)
+		return 0;
+	
+	/* initialize it with nothing mapped */
+	for (x = 0; x < 4096; ++x) {
+		tlb[x] = 0;
+	}
+	
+	return (uint32*)tlb;
+}
+
+extern uint8 _BOI;
+extern uint8 _EOI;
+
 void start() {
 	uint32		*t0mmio;
 	uint32		*picmmio;
 	KSTATE		*ks;
 	int			x;
 	uint32		lock;
-	uint32		*tlb;
+	uint32		*tlb, *tlb2;
+	char		buf[128];
+	uint32		*a, *b;
+	uint8		*bm;
 	
 	ks = (KSTATE*)KSTATEADDR;
 	
 	kserdbg_putc('Y');
+	
+	arm4_xrqinstall(ARM4_XRQ_RESET, &k_exphandler_reset_entry);
+	arm4_xrqinstall(ARM4_XRQ_UNDEF, &k_exphandler_undef_entry);
+	arm4_xrqinstall(ARM4_XRQ_SWINT, &k_exphandler_swi_entry);
+	arm4_xrqinstall(ARM4_XRQ_ABRTP, &k_exphandler_abrtp_entry);
+	arm4_xrqinstall(ARM4_XRQ_ABRTD, &k_exphandler_abrtd_entry);
+	arm4_xrqinstall(ARM4_XRQ_IRQ, &k_exphandler_irq_entry);
+	arm4_xrqinstall(ARM4_XRQ_FIQ, &k_exphandler_fiq_entry);
 	
 	/*
 		========== CREATE PHYSICAL PAGE HEAP AND CHUNK HEAP ======
@@ -556,25 +611,67 @@ void start() {
 	*/
 	/* create physical page heap */
 	k_heapBMInit(&ks->hphy);
-	/* we lose about 2K (doing nothing) but if KPHYPAGESIZE was 2048 we would not but slower */
-	k_heapBMAddBlock(&ks->hphy, KRAMADDR, KRAMSIZE, KPHYPAGESIZE);
-	/* create chunk heap (small allocations) */
 	k_heapBMInit(&ks->hchk);
-	/* hs->hchk wil have blocks added on demand.. so we do nothing right now (see kmalloc) */
-
-	tlb = (uint32*)k_heapBMAllocBound(&ks->hphy, 1024 * 16, 14); 
+	/* get a bit of memory to start with for small chunk */
+	k_heapBMAddBlock(&ks->hchk, 4 * 7, KRAMADDR - (4 * 7), 16);
+		
+	/* state structure */
+	k_heapBMSet(&ks->hchk, KSTATEADDR, sizeof(KSTATE), 5);
+	/* stacks (can free KSTACKSTART later) */
+	k_heapBMSet(&ks->hchk, KSTACKSTART - 0x1000, 0x1000, 6);
+	k_heapBMSet(&ks->hchk, KSTACKEXC - 0x1000, 0x1000, 7);
 	
-	#define TLB_SECTION			0x002
+	/* add block but place header in chunk heap to keep alignment */
+	bm = (uint8*)k_heapBMAlloc(&ks->hchk, k_heapBMGetBMSize(KRAMSIZE - KRAMADDR, 0x1000));
+	k_heapBMAddBlockEx(&ks->hphy, KRAMADDR, KRAMSIZE - KRAMADDR, 0x1000, (KHEAPBLOCKBM*)k_heapBMAlloc(&ks->hchk, sizeof(KHEAPBLOCKBM)), bm, 0);
+	
+	/* remove kernel image region */
+	k_heapBMSet(&ks->hphy, 0x10000, 0x4000, 8);
+	
+	#define TLB_FAULT			0x000		/* entry is unmapped (bits 32:2 can be used for anything) but access generates an ABORT */
+	#define TLB_SECTION			0x002		/* entry maps 1MB chunk */
+	#define TLB_2LVLARGE		0x001		/* entry points to second table of type large (supported on VMSAv6)*/
+	#define TLB_2LVSMALL		0x003		/* entry points to second table of type small (not supported on VMSAv6) */	
 	#define TLB_CACHE			0x000
 	#define TLB_DOMAIN			0x000
-	#define TLB_ACCESS			0xc00;
+	#define TLB_ACCESS			0xc00
 	
-	for (x = 0; x < 1024; ++x) {
-		tlb[x] = (x << 20) | TBL_ACCESS | TLB_SECTION;
+	tlb = kalloc1MBTLB();
+	tlb2 = kalloc1MBTLB();
+	
+	/* map 4GB of space - each entry is 1MB */
+	for (x = 0; x < 4096; ++x) {
+		tlb[x] = (x << 20) | TLB_ACCESS | TLB_SECTION;
 	}
 	
-	arm4_loadtlb((uintptr)tlb);
+	/* do a little trick to map the same memory twice */
+	tlb2[0x800] = (1 << 20) | TLB_ACCESS | TLB_SECTION;
+	tlb2[0x801] = (1 << 20) | TLB_ACCESS | TLB_SECTION;
+	//tlb[1] = 0;
+	//tlb[2] = 0;
 	
+	kserdbg_puts("OK\n");
+	
+	arm4_tlbsetmode(1);
+	/* load location of TLB */
+	arm4_tlbset1((uintptr)tlb2);
+	arm4_tlbset0((uintptr)tlb);
+	/* set that all domains are checked against the TLB entry access permissions */
+	arm4_tlbsetdom(0x55555555);
+	/* enable TLB */
+	arm4_tlbenable();
+	
+	kserdbg_puts("OK2\n");
+	
+	/* check trick - as you can see the same 1MB chunk is mapped twice */
+	a = (uint32*)0x80000000;
+	b = (uint32*)0x80100000;
+	a[0] = 0x12345678;
+	ksprintf(buf, "b[0]:%x\n", b[0]);
+	kserdbg_puts(buf);
+	
+	kserdbg_puts("DONE\n");
+	for(;;);
 	
 	/* testing something GCC specific (built-in atomic locking) */
 	//while (__sync_val_compare_and_swap(&lock, 0, 1));
@@ -602,14 +699,6 @@ void start() {
 	
 	/* the first thread to run */
 	ks->threadndx = 0x0;
-
-	arm4_xrqinstall(ARM4_XRQ_RESET, &k_exphandler_reset_entry);
-	arm4_xrqinstall(ARM4_XRQ_UNDEF, &k_exphandler_undef_entry);
-	arm4_xrqinstall(ARM4_XRQ_SWINT, &k_exphandler_swi_entry);
-	arm4_xrqinstall(ARM4_XRQ_ABRTP, &k_exphandler_abrtp_entry);
-	arm4_xrqinstall(ARM4_XRQ_ABRTD, &k_exphandler_abrtd_entry);
-	arm4_xrqinstall(ARM4_XRQ_IRQ, &k_exphandler_irq_entry);
-	arm4_xrqinstall(ARM4_XRQ_FIQ, &k_exphandler_fiq_entry);
 	
 	kserdbg_putc('Z');
 	

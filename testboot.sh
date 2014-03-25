@@ -1,2 +1,2 @@
 #!/bin/sh
-qemu-system-arm -m 8 -kernel armos.bin -serial stdio
+qemu-system-arm -m 64 -kernel armos.bin -serial stdio
