@@ -56,7 +56,6 @@ int kstack_push(KSTACK *stack, uint32 v) {
 		b->next = _b;
 		stack->cur = _b;
 		
-		kprintf("_b:%x\n", _b);
 		ASSERTPANIC(_b, "KSTACK UNABLE TO CREATE NEW BLOCK");
 		
 		/* swap and init */
@@ -479,7 +478,7 @@ int kvmm2_mapsingle(KVMMTABLE *vmm, uintptr v, uintptr p, uint32 flags) {
 		ks->vmm_ucte -= 1;
 	}
 
-	kprintf("mapped tbl:[%x] %x -> %x [flags:%x]\n", t, v, p, flags & 0xfff);
+	//kprintf("mapped tbl:[%x] %x -> %x [flags:%x]\n", t, v, p, flags & 0xfff);
 	
 	flags = flags & 0xfff;
 	st[(v >> 12) & 0xff] = p | flags | TLB_C_SMALLPAGE;

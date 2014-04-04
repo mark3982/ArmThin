@@ -11,6 +11,7 @@
 #include "main.h"
 #include "kheap.h"
 #include "vmm.h"
+#include "kmod.h"
 
 extern uint8 _BOI;
 extern uint8 _EOI;
@@ -31,139 +32,6 @@ void __attribute__((naked)) entry()
 	asm("str r2, [r1]");
 	/* call main kernel function */
 	asm("bl	start");
-}
-
-#define SERIAL_BASE 0x16000000
-#define SERIAL_FLAG_REGISTER 0x18
-#define SERIAL_BUFFER_FULL (1 << 5)
-
-void kserdbg_putc(char c)
-{
-    while (*(volatile unsigned long*)(SERIAL_BASE + SERIAL_FLAG_REGISTER) & (SERIAL_BUFFER_FULL));
-	
-    *(volatile unsigned long*)SERIAL_BASE = c;
-}
-
-void kserdbg_puts(const char * str)
-{
-    while (*str != 0) {
-		kserdbg_putc(*str++);
-	}
-}
-
-static char* itoh(int i, char *buf)
-{
-	const char 	*itoh_map = "0123456789ABCDEF";
-	int			n;
-	int			b;
-	int			z;
-	int			s;
-	
-	if (sizeof(void*) == 4)
-		s = 8;
-	if (sizeof(void*) == 8)
-		s = 16;
-	
-	for (z = 0, n = (s - 1); n > -1; --n)
-	{
-		b = (i >> (n * 4)) & 0xf;
-		buf[z] = itoh_map[b];
-		++z;
-	}
-	buf[z] = 0;
-	return buf;
-}
-
-void __ksprintf(char *buf, const char *fmt, __builtin_va_list argp)
-{
-	const char 				*p;
-	int 					i;
-	char 					*s;
-	char 					fmtbuf[256];
-	int						x, y;
-
-	//__builtin_va_start(argp, fmt);
-	
-	x = 0;
-	for(p = fmt; *p != '\0'; p++)
-	{
-		if (*p == '\\') {
-			switch (*++p) {
-				case 'n':
-					buf[x++] = '\n';
-					break;
-				default:
-					break;
-			}
-			continue;
-		}
-	
-		if(*p != '%')
-		{
-			buf[x++] = *p;
-			continue;
-		}
-
-		switch(*++p)
-			{
-			case 'c':
-				i = __builtin_va_arg(argp, int);
-				buf[x++] = i;
-				break;
-			case 's':
-				s = __builtin_va_arg(argp, char*);
-				for (y = 0; s[y]; ++y) {
-					buf[x++] = s[y];
-				}
-				break;
-			case 'x':
-				i = __builtin_va_arg(argp, int);
-				s = itoh(i, fmtbuf);
-				for (y = 0; s[y]; ++y) {
-					buf[x++] = s[y];
-				}
-				break;
-			case '%':
-				buf[x++] = '%';
-				break;
-		}
-	}
-	
-	//__builtin_va_end(argp);
-	buf[x] = 0;
-}
-
-void ksprintf(char *buf, const char *fmt, ...) {
-	__builtin_va_list		argp;
-	
-	__builtin_va_start(argp, fmt);
-	__ksprintf(buf, fmt, argp);
-	__builtin_va_end(argp);
-}
-
-void kprintf(const char *fmt, ...) {
-	char					buf[128];
-	__builtin_va_list		argp;
-	
-	__builtin_va_start(argp, fmt);
-	__ksprintf(buf, fmt, argp);
-	kserdbg_puts(buf);
-	__builtin_va_end(argp);
-}
-
-void stackprinter() {
-	uint32		tmp;
-	uint32		*s;
-	uint32		x;
-	
-	s = (uint32*)&tmp;
-	
-	for (x = 0; (((uintptr)&s[x]) & 0xFFF) != 0; ++x) {
-		if (s[x] >= (uintptr)&_BOI && s[x] <= (uintptr)&_EOI) {
-			kprintf("stack[%x]:%x\n", x, s[x]);
-		}
-	}
-	kprintf("STACK-DUMP-DONE\n");
 }
 
 /* small chunk memory alloc/free */
@@ -521,6 +389,7 @@ void start() {
 	uintptr		page;
 	uintptr		__vmm;
 	KVMMTABLE	test;
+	uintptr		eoiwmods;
 	
 	ks = (KSTATE*)KSTATEADDR;
 	
@@ -534,6 +403,11 @@ void start() {
 	arm4_xrqinstall(ARM4_XRQ_IRQ, &k_exphandler_irq_entry);
 	arm4_xrqinstall(ARM4_XRQ_FIQ, &k_exphandler_fiq_entry);
 
+	/* get end of image w/ mods */
+	eoiwmods = kPkgGetTotalLength();
+	
+	kprintf("eoiwmods:%x\n", eoiwmods);
+	
 	/* create physical page heap */
 	k_heapBMInit(&ks->hphy);
 	k_heapBMInit(&ks->hchk);
@@ -545,7 +419,7 @@ void start() {
 	/* stacks (can free KSTACKSTART later) */
 	k_heapBMSet(&ks->hchk, KSTACKSTART - 0x1000, 0x1000, 6);
 	k_heapBMSet(&ks->hchk, KSTACKEXC - 0x1000, 0x1000, 7);
-	k_heapBMSet(&ks->hchk, (uintptr)&_BOI, (uintptr)&_EOI - (uintptr)&_BOI, 8);
+	k_heapBMSet(&ks->hchk, (uintptr)&_BOI, eoiwmods - (uintptr)&_BOI, 8);
 	
 	/* add block but place header in chunk heap to keep alignment */
 	bm = (uint8*)k_heapBMAlloc(&ks->hchk, k_heapBMGetBMSize(KRAMSIZE - KRAMADDR, KPHYPAGESIZE));
@@ -559,7 +433,7 @@ void start() {
 		be sure if it resides in which one or if it spans both somehow so to be safe this works
 		quite well.
 	*/
-	k_heapBMSet(&ks->hphy, (uintptr)&_BOI, (uintptr)&_EOI - (uintptr)&_BOI, 8);
+	k_heapBMSet(&ks->hphy, (uintptr)&_BOI, eoiwmods - (uintptr)&_BOI, 8);
 
 	kserdbg_putc('D');
 	
@@ -570,7 +444,7 @@ void start() {
 	/* map kernel image */
 	kvmm2_mapmulti(&ks->vmm, 
 					(uintptr)&_BOI, (uintptr)&_BOI,
-					kvmm2_rndup((uintptr)&_EOI - (uintptr)&_BOI), 
+					kvmm2_rndup(eoiwmods - (uintptr)&_BOI), 
 					TLB_C_AP_PRIVACCESS | KVMM_DIRECT
 	);
 	/* map reverse table (ALREADY MAPPED WITH HCHK BELOW) */

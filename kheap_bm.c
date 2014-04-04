@@ -79,7 +79,7 @@ void *k_heapBMAllocBound(KHEAPBM *heap, uint32 size, uint32 bound) {
 	/* iterate blocks */
 	for (b = heap->fblock; b; b = b->next) {
 		/* check if block has enough room */
-		kprintf("bmalloc:%x; b->size:%x b->used:%x size:%x\n", heap, b->size, b->used * b->bsize, size);
+		//kprintf("bmalloc:%x; b->size:%x b->used:%x size:%x\n", heap, b->size, b->used * b->bsize, size);
 		if (b->size - (b->used * b->bsize) >= size) {
 			bcnt = b->size / b->bsize;		
 			bneed = (size / b->bsize) * b->bsize < size ? size / b->bsize + 1 : size / b->bsize;

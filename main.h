@@ -4,6 +4,7 @@
 #include "config.h"
 #include "vmm.h"
 #include "kheap.h"
+#include "dbgout.h"
 
 #define ARM4_XRQ_RESET   0x00
 #define ARM4_XRQ_UNDEF   0x01
