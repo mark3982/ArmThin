@@ -88,13 +88,26 @@ typedef struct _KTHREAD {
 	uint8			valid;
 	uint32			r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, sp, lr, cpsr, pc;
 	KVMMTABLE		vmm;
+	
+	struct _KTHREAD		*next;
+	struct _KTHREAD		*prev;
 } KTHREAD;
+
+typedef struct _KPROCESS {
+	KTHREAD				*thread;
+	
+	struct _KPROCESS	*next;
+	struct _KPROCESS	*prev;
+} KPROCESS;
 
 typedef struct _KSTATE {
 	/* process/thread support */
 	KTHREAD			threads[0x10];
 	uint8			threadndx;	
 	uint8			iswitch;
+	
+	/* new process/thread support */
+	KPROCESS		*process;
 	
 	/* physical and heap memory management */
 	KHEAPBM			hphy;			/* kernel physical page heap */

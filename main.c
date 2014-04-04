@@ -120,6 +120,13 @@ void arm4_tlbset1(uint32 base) {
 	asm("mcr p15, 0, %[tlb], c2, c0, 1" : : [tlb]"r" (base));
 }
 
+uint32 arm4_tlbget1() {
+	uint32			base;
+	asm("mrc p15, 0, %[tlb], c2, c0, 1" : [tlb]"=r" (base));
+	
+	return base;
+}
+
 void arm4_tlbsetmode(uint32 val) {
 	asm("mcr p15, 0, %[tlb], c2, c0, 2" : : [tlb]"r" (val));
 }
@@ -329,10 +336,8 @@ void k_exphandler(uint32 lr, uint32 type) {
 			correct offset. I am using the same return for everything except SWI, 
 			which requires that LR not be offset before return.
 		*/
-		kserdbg_putc('\n');
-		kserdbg_putc('!');
-		ksprintf(buf, "lr:%x [%x]\n", lr, ((uint32*)lr)[0]);
-		kserdbg_puts(buf);
+		kprintf("!EXCEPTION\n");
+		kprintf("lr:%x\n", lr);
 		for(;;);
 	}
 	
@@ -375,6 +380,128 @@ void thread1(uintptr serdbgout) {
 	}
 }
 
+typedef uint16 Elf32_Half;
+typedef uint32 Elf32_Word;
+typedef uint32 Elf32_Off;
+typedef uint32 Elf32_Addr;
+
+#define EI_NIDENT 16
+typedef struct {
+        unsigned char   e_ident[EI_NIDENT];
+        Elf32_Half      e_type;
+        Elf32_Half      e_machine;
+        Elf32_Word      e_version;
+        Elf32_Addr      e_entry;
+        Elf32_Off       e_phoff;
+        Elf32_Off       e_shoff;
+        Elf32_Word      e_flags;
+        Elf32_Half      e_ehsize;
+        Elf32_Half      e_phentsize;
+        Elf32_Half      e_phnum;
+        Elf32_Half      e_shentsize;
+        Elf32_Half      e_shnum;
+        Elf32_Half      e_shtrndx;
+} ELF32_EHDR;
+
+#define EM_ARM			40
+
+typedef struct {
+       Elf32_Word      sh_name;
+       Elf32_Word      sh_type;
+       Elf32_Word      sh_flags;
+       Elf32_Addr      sh_addr;
+       Elf32_Off       sh_offset;
+       Elf32_Word      sh_size;
+       Elf32_Word      sh_link;
+       Elf32_Word      sh_info;
+       Elf32_Word      sh_addralign;
+       Elf32_Word      sh_entsize;
+} ELF32_SHDR;
+
+int kelfload(KTHREAD *th, uintptr addr, uintptr sz) {
+	ELF32_EHDR			*ehdr;
+	ELF32_SHDR			*shdr;
+	uint32				x, y;
+	uintptr				page, oldpage;
+	KSTATE				*ks;
+	uint8				*fb;
+	
+	kprintf("loading elf into memory space\n");
+	
+	ks = (KSTATE*)KSTATEADDR;
+	
+	ehdr = (ELF32_EHDR*)addr;
+	if (ehdr->e_machine != EM_ARM) {
+		kprintf("kelfload: not ARM machine!\n");
+		return 0;
+	}
+	
+	if (ehdr->e_ident[4] != 0x1) {
+		kprintf("kelfload: not ELF32 object\n");
+		return 0;
+	}
+	
+	kvmm2_init(&th->vmm);
+	th->pc = ehdr->e_entry;
+	th->valid = 1;
+	th->cpsr = 0x60000000 | ARM4_MODE_USER;
+	/* set stack */
+	th->sp = 0x90001000;
+	/* pass address of serial output as first argument */
+	th->r0 = 0xa0000000;
+	/* map serial output mmio */
+	kvmm2_mapsingle(&th->vmm, 0xa0000000, 0x16000000, TLB_C_AP_FULLACCESS);
+	/* map stack page (4K) */
+	kvmm2_allocregionat(&th->vmm, 1, 0x90000000, TLB_C_AP_FULLACCESS);
+
+	/* map address space so we can work directly with it */
+	kvmm2_getphy(&ks->vmm, (uintptr)th->vmm.table, &page);
+	oldpage = arm4_tlbget1();
+	arm4_tlbset1(page);
+	
+	// e_shoff - section table offset
+	// e_shentsize - size of each section entry
+	// e_shnum - count of entries in table
+	for (x = 0; x < ehdr->e_shnum; ++x) {
+		shdr = (ELF32_SHDR*)(addr + ehdr->e_shoff + x * ehdr->e_shentsize);
+		if (shdr->sh_addr != 0) {
+			/* load this into memory */
+			// sh_offset - byte offset in module
+			// sh_size - size of section in module 
+			// sh_addr - address to load at
+			kvmm2_allocregionat(&th->vmm, kvmm2_rndup(shdr->sh_size), shdr->sh_addr, TLB_C_AP_FULLACCESS);
+			fb = (uint8*)(addr + shdr->sh_offset);
+			/* copy */
+			for (y = 0; y < shdr->sh_size; ++y) {
+				((uint8*)shdr->sh_addr)[y] = fb[y];
+			}
+		}
+	}
+	
+	/* restore previous address space */
+	arm4_tlbset1(oldpage);
+}
+
+typedef struct _KRINGBUFHDR {
+	uint32				r;
+	uint32				w;
+} RINGBUFHDR;
+
+/*
+	the writer can write if r==w
+	the writer has to wait if w < r and sz > (r - w)
+    the writer has to wait if w >= r and ((mask - w) + r) < sz
+	
+	the reader has to wait if r == w
+	the reader can read during any other condition
+	
+	POINTS
+			- research memory barrier to prevent modification of index
+			  before data is written into the buffer
+			- consider two methods for sleeping.. one using a flag bit
+			  for the thread/process and the other using a lock
+*/
+
 void start() {
 	uint32		*t0mmio;
 	uint32		*picmmio;
@@ -390,6 +517,7 @@ void start() {
 	uintptr		__vmm;
 	KVMMTABLE	test;
 	uintptr		eoiwmods;
+	KATTMOD		*m;
 	
 	ks = (KSTATE*)KSTATEADDR;
 	
@@ -541,6 +669,29 @@ void start() {
 	ks->threadndx = 0x0;
 	
 	kserdbg_putc('Z');
+	
+	#define KMODTYPE_ELFUSER			1
+	/*
+		create a task for any attached modules of the correct type
+	*/
+	kprintf("looking at attached modules\n");
+	for (m = kPkgGetFirstMod(); m; m = kPkgGetNextMod(m)) {
+		kprintf("looking at module\n");
+		if (m->type == KMODTYPE_ELFUSER) {
+			/* find free task structure */
+			for (x = 0; x < 0x10; ++x) {
+				if (!ks->threads[x].valid) {
+					break;
+				}
+			}
+			
+			if (x >= 0x10) {
+				PANIC("out-of-task-slots");
+			}
+			
+			kelfload(&ks->threads[x], (uintptr)&m->slot[0], m->size);
+		}
+	}
 	
 	/* enable IRQ */
 	arm4_cpsrset(arm4_cpsrget() & ~(1 << 7));

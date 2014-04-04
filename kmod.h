@@ -6,8 +6,8 @@ typedef struct _KATTMOD {
 	uint32			size;
 	uint32			signatureA;
 	uint32			signatureB;
-	uint32			flags;
-	uint32			ptr[];
+	uint32			type;
+	uint32			slot[];
 } KATTMOD;
 
 KATTMOD *kPkgGetNextMod(KATTMOD *mod);
