@@ -85,19 +85,19 @@
 	asm("LDM sp!, {pc}^")
 	
 typedef struct _KTHREAD {
-	uint8			valid;
-	uint32			r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, sp, lr, cpsr, pc;
-	KVMMTABLE		vmm;
-	
 	struct _KTHREAD		*next;
 	struct _KTHREAD		*prev;
+	
+	uint8				valid;
+	uint32				r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, sp, lr, cpsr, pc;
 } KTHREAD;
 
 typedef struct _KPROCESS {
-	KTHREAD				*thread;
-	
 	struct _KPROCESS	*next;
 	struct _KPROCESS	*prev;
+
+	KVMMTABLE			vmm;
+	KTHREAD				*threads;
 } KPROCESS;
 
 typedef struct _KSTATE {
@@ -107,7 +107,9 @@ typedef struct _KSTATE {
 	uint8			iswitch;
 	
 	/* new process/thread support */
-	KPROCESS		*process;
+	KPROCESS		*procs;
+	KPROCESS		*cproc;
+	KTHREAD			*cthread;
 	
 	/* physical and heap memory management */
 	KHEAPBM			hphy;			/* kernel physical page heap */

@@ -168,6 +168,191 @@ void kpfree(void *ptr) {
 	k_heapBMFree(&ks->hphy, ptr);
 }
 
+typedef struct _LL {
+	struct _LL			*next;
+	struct _LL			*prev;
+} LL;
+
+void ll_add(void **p, void *i) {
+	LL		*_i;
+	
+	_i = (LL*)i;
+	
+	_i->next = *p;
+	if (*p) {
+		_i->prev = ((LL*)(*p))->prev;
+	} else {
+		_i->prev = 0;
+	}
+	
+	if (p) {
+		*p = _i;
+	}
+}
+
+void ll_rem(void **p, void *i) {
+	LL			*_i;
+	
+	_i = (LL*)i;
+
+	if (_i->prev) {
+		_i->prev->next = _i->next;
+	}
+	
+	if (_i->next) {
+		_i->next->prev = _i->prev;
+	}
+	
+	if (p) {
+		if (*p == i) {
+			if (_i->prev) {
+				*p = _i->prev;
+			} else {
+				*p = _i->next;
+			}
+		}
+	}
+}
+
+void ksched() {
+	KSTATE			*ks;
+	KTHREAD			*kt;
+	uint32			__lr, __sp, __spsr;
+	uintptr			page;
+	
+	ks = (KSTATE*)KSTATEADDR;
+
+	/* if valid process and thread then store */
+	if (ks->cproc && ks->cthread) {
+		/*
+			1. store register on stack in thread struct
+			2. access hidden registers and store in thread struct
+		*/
+		kt = ks->cthread;
+		kt->pc = ((uint32*)KSTACKEXC)[-1];
+		kt->r12 = ((uint32*)KSTACKEXC)[-2];
+		kt->r11 = ((uint32*)KSTACKEXC)[-3];
+		kt->r10 = ((uint32*)KSTACKEXC)[-4];
+		kt->r9 = ((uint32*)KSTACKEXC)[-5];
+		kt->r8 = ((uint32*)KSTACKEXC)[-6];
+		kt->r7 = ((uint32*)KSTACKEXC)[-7];
+		kt->r6 = ((uint32*)KSTACKEXC)[-8];
+		kt->r5 = ((uint32*)KSTACKEXC)[-9];
+		kt->r4 = ((uint32*)KSTACKEXC)[-10];
+		kt->r3 = ((uint32*)KSTACKEXC)[-11];
+		kt->r2 = ((uint32*)KSTACKEXC)[-12];
+		kt->r1 = ((uint32*)KSTACKEXC)[-13];
+		kt->r0 = ((uint32*)KSTACKEXC)[-14];
+		kt->cpsr = ((uint32*)KSTACKEXC)[-15];
+		/*
+		stack viewer
+		
+		for (x = 0; x < 16; ++x) {
+			ksprintf(buf, "stack[%x]:%x\n", x, ((uint32*)KSTACKEXC)[-x]);
+			kserdbg_puts(buf);
+		}
+		*/
+		kprintf("kt->lr:%x threadndx:%x\n", kt->lr, ks->threadndx);
+		/* switch to system mode get hidden registers then switch back */
+		asm("mrs r0, cpsr \n\
+			 bic r0, r0, #0x1f \n\
+			 orr r0, r0, #0x1f \n\
+			 msr cpsr, r0 \n\
+			 mov %[sp], sp \n\
+			 mov %[lr], lr \n\
+			 bic r0, r0, #0x1f \n\
+			 orr r0, r0, #0x12 \n\
+			 msr cpsr, r0 \n\
+			 " : [sp]"=r" (__sp), [lr]"=r" (__lr));
+		kt->sp = __sp;
+		kt->lr = __lr;
+		kprintf("<---threadndx:%x kt->pc:%x kt->pc:%x kt->lr:%x\n", ks->threadndx, kt->pc, kt->lr);
+	}
+	
+	if (!ks->cproc) {
+		/* initial start */
+		ks->cproc = ks->procs;
+		ks->cthread = ks->procs->threads;
+	} else {
+		if (ks->cthread) {
+			/* get next thread */
+			ks->cthread = ks->cthread->next;
+		}
+		/* if none get next process */
+		if (!ks->cthread) {
+			/* get next process */
+			if (ks->cproc) {
+				ks->cproc = ks->cproc->next;
+			}
+			/* if none get first process */
+			if (!ks->cproc) {
+				ks->cproc = ks->procs;
+			}
+			/* get first thread */
+			if (ks->cproc) {
+				ks->cthread = ks->cproc->threads;
+			} else {
+				ks->cthread = 0;
+			}
+		}
+	}
+	
+	/* hopefully we got something or the system should deadlock */
+	kt = ks->cthread;
+	
+	if (!kt) {
+		PANIC("no-threads");
+	}
+	
+	kprintf("--->process:%x thread:%x kt->pc:%x kt->lr:%x\n", ks->cproc, ks->cthread, kt->pc, kt->lr);
+	/*
+		load registers
+	*/
+	((uint32*)KSTACKEXC)[-1] = kt->pc;
+	((uint32*)KSTACKEXC)[-2] = kt->r12;
+	((uint32*)KSTACKEXC)[-3] = kt->r11;
+	((uint32*)KSTACKEXC)[-4] = kt->r10;
+	((uint32*)KSTACKEXC)[-5] = kt->r9;
+	((uint32*)KSTACKEXC)[-6] = kt->r8;
+	((uint32*)KSTACKEXC)[-7] = kt->r7;
+	((uint32*)KSTACKEXC)[-8] = kt->r6;
+	((uint32*)KSTACKEXC)[-9] = kt->r5;
+	((uint32*)KSTACKEXC)[-10] = kt->r4;
+	((uint32*)KSTACKEXC)[-11] = kt->r3;
+	((uint32*)KSTACKEXC)[-12] = kt->r2;
+	((uint32*)KSTACKEXC)[-13] = kt->r1;
+	((uint32*)KSTACKEXC)[-14] = kt->r0;
+	((uint32*)KSTACKEXC)[-15] = kt->cpsr;
+	kprintf("cpsr:%x\n", arm4_cpsrget());
+	/* switch into system mode restore hidden registers then switch back */
+	asm("mrs r0, cpsr \n\
+		 bic r0, r0, #0x1f \n\
+		 orr r0, r0, #0x1f \n\
+		 msr cpsr, r0 \n\
+		 mov sp, %[sp] \n\
+		 mov lr, %[lr] \n\
+		 bic r0, r0, #0x1f \n\
+		 orr r0, r0, #0x12 \n\
+		 msr cpsr, r0 \n\
+		 " : : [sp]"r" (kt->sp), [lr]"r" (kt->lr));
+	/* set TLB table for user space (it can be zero for kernel) */
+	kvmm2_getphy(&ks->vmm, (uintptr)ks->cproc->vmm.table, &page);
+	arm4_tlbset1(page);
+	/* 
+		Invalidate all unlocked entries...
+		
+		..according to the manual there may be a better way to invalidate,
+		only some entries per process. But, for now this should work.
+		
+		If you do not do this then the TLB does not flush and old entries
+		from the previous process will still be in the TLB cache.
+	*/
+	asm("mcr p15, #0, r0, c8, c7, #0");
+	
+	//arm4_tlbsetctrl(arm4_tlbgetctrl() | 0x1 | (1 << 23));
+	kprintf("ks->cproc->vmm.table:%x\n", ks->cproc->vmm.table);
+}
+
 void k_exphandler(uint32 lr, uint32 type) {
 	uint32			*t0mmio;
 	uint32			*picmmio;
@@ -176,8 +361,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 	KSTATE			*ks;
 	int				x;
 	KTHREAD			*kt;
-	uint32			__lr, __sp, __spsr;
-	uintptr			out, page;
+	uintptr			out;
 	
 	ks = (KSTATE*)KSTATEADDR;
 		
@@ -202,114 +386,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 			t0mmio = (uint32*)0x13000000;
 			t0mmio[REG_INTCLR] = 1;			/* according to the docs u can write any value */
 			
-			/* dont store registers on first switch */
-			if (!ks->iswitch) {
-				/*
-					1. store register on stack in thread struct
-					2. access hidden registers and store in thread struct
-				*/
-				kt = &ks->threads[ks->threadndx];
-				kt->pc = ((uint32*)KSTACKEXC)[-1];
-				kt->r12 = ((uint32*)KSTACKEXC)[-2];
-				kt->r11 = ((uint32*)KSTACKEXC)[-3];
-				kt->r10 = ((uint32*)KSTACKEXC)[-4];
-				kt->r9 = ((uint32*)KSTACKEXC)[-5];
-				kt->r8 = ((uint32*)KSTACKEXC)[-6];
-				kt->r7 = ((uint32*)KSTACKEXC)[-7];
-				kt->r6 = ((uint32*)KSTACKEXC)[-8];
-				kt->r5 = ((uint32*)KSTACKEXC)[-9];
-				kt->r4 = ((uint32*)KSTACKEXC)[-10];
-				kt->r3 = ((uint32*)KSTACKEXC)[-11];
-				kt->r2 = ((uint32*)KSTACKEXC)[-12];
-				kt->r1 = ((uint32*)KSTACKEXC)[-13];
-				kt->r0 = ((uint32*)KSTACKEXC)[-14];
-				kt->cpsr = ((uint32*)KSTACKEXC)[-15];
-				/*
-				stack viewer
-				
-				for (x = 0; x < 16; ++x) {
-					ksprintf(buf, "stack[%x]:%x\n", x, ((uint32*)KSTACKEXC)[-x]);
-					kserdbg_puts(buf);
-				}
-				*/
-				ksprintf(buf, "kt->lr:%x threadndx:%x\n", kt->lr, ks->threadndx);
-				kserdbg_puts(buf);
-				/* switch to system mode get hidden registers then switch back */
-				asm("mrs r0, cpsr \n\
-					 bic r0, r0, #0x1f \n\
-					 orr r0, r0, #0x1f \n\
-					 msr cpsr, r0 \n\
-					 mov %[sp], sp \n\
-					 mov %[lr], lr \n\
-					 bic r0, r0, #0x1f \n\
-					 orr r0, r0, #0x12 \n\
-					 msr cpsr, r0 \n\
-					 " : [sp]"=r" (__sp), [lr]"=r" (__lr));
-				kt->sp = __sp;
-				kt->lr = __lr;
-				ksprintf(buf, "<---threadndx:%x kt->pc:%x kt->pc:%x kt->lr:%x\n", ks->threadndx, kt->pc, kt->lr);
-				kserdbg_puts(buf);
-			}
-			/*
-				get next thread (if not initial switch)
-			*/
-			if (!ks->iswitch) {
-				for (ks->threadndx = (ks->threadndx + 1) & 0xf; !ks->threads[ks->threadndx].valid; ks->threadndx = (ks->threadndx + 1) & 0xf);
-			}
-			
-			ks->iswitch = 0;
-			
-			kt = &ks->threads[ks->threadndx];
-			ksprintf(buf, "--->threadndx:%x kt->pc:%x kt->lr:%x\n", ks->threadndx, kt->pc, kt->lr);
-			kserdbg_puts(buf);
-			/*
-				load registers
-			*/
-			((uint32*)KSTACKEXC)[-1] = kt->pc;
-			((uint32*)KSTACKEXC)[-2] = kt->r12;
-			((uint32*)KSTACKEXC)[-3] = kt->r11;
-			((uint32*)KSTACKEXC)[-4] = kt->r10;
-			((uint32*)KSTACKEXC)[-5] = kt->r9;
-			((uint32*)KSTACKEXC)[-6] = kt->r8;
-			((uint32*)KSTACKEXC)[-7] = kt->r7;
-			((uint32*)KSTACKEXC)[-8] = kt->r6;
-			((uint32*)KSTACKEXC)[-9] = kt->r5;
-			((uint32*)KSTACKEXC)[-10] = kt->r4;
-			((uint32*)KSTACKEXC)[-11] = kt->r3;
-			((uint32*)KSTACKEXC)[-12] = kt->r2;
-			((uint32*)KSTACKEXC)[-13] = kt->r1;
-			((uint32*)KSTACKEXC)[-14] = kt->r0;
-			((uint32*)KSTACKEXC)[-15] = kt->cpsr;
-			ksprintf(buf, "cpsr:%x\n", arm4_cpsrget());
-			kserdbg_puts(buf);
-			/* switch into system mode restore hidden registers then switch back */
-			asm("mrs r0, cpsr \n\
-				 bic r0, r0, #0x1f \n\
-				 orr r0, r0, #0x1f \n\
-				 msr cpsr, r0 \n\
-				 mov sp, %[sp] \n\
-				 mov lr, %[lr] \n\
-				 bic r0, r0, #0x1f \n\
-				 orr r0, r0, #0x12 \n\
-				 msr cpsr, r0 \n\
-				 " : : [sp]"r" (kt->sp), [lr]"r" (kt->lr));
-			/* set TLB table for user space (it can be zero for kernel) */
-			kvmm2_getphy(&ks->vmm, (uintptr)kt->vmm.table, &page);
-			arm4_tlbset1(page);
-			/* 
-				Invalidate all unlocked entries...
-				
-				..according to the manual there may be a better way to invalidate,
-				only some entries per process. But, for now this should work.
-				
-				If you do not do this then the TLB does not flush and old entries
-				from the previous process will still be in the TLB cache.
-			*/
-			asm("mcr p15, #0, r0, c8, c7, #0");
-			
-			//arm4_tlbsetctrl(arm4_tlbgetctrl() | 0x1 | (1 << 23));
-			ksprintf(buf, "kt->vmm.table:%x\n", kt->vmm.table);
-			kserdbg_puts(buf);
+			ksched();
 			/* go back through normal interrupt return process */
 			return;
 		}
@@ -322,9 +399,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 		swi = ((uint32*)((uintptr)lr - 4))[0] & 0xffff;
 		
 		if (swi == 4) {
-			ksprintf(buf, "SWI cpsr:%x spsr:%x code:%x\n", arm4_cpsrget(), arm4_spsrget(), swi);
-			kserdbg_puts(buf);
-			kserdbg_putc('@');
+			kprintf("SWI cpsr:%x spsr:%x code:%x\n", arm4_cpsrget(), arm4_spsrget(), swi);
 		}
 		
 		return;
@@ -337,8 +412,11 @@ void k_exphandler(uint32 lr, uint32 type) {
 			which requires that LR not be offset before return.
 		*/
 		kprintf("!EXCEPTION\n");
-		kprintf("lr:%x\n", lr);
-		for(;;);
+		kprintf("cproc:%x cthread:%x lr:%x\n", ks->cproc, ks->cthread, lr);
+		
+		ll_rem((void**)&ks->cproc->threads, ks->cthread);
+		ks->cthread = 0;
+		ksched();
 	}
 	
 	return;
@@ -418,18 +496,31 @@ typedef struct {
        Elf32_Word      sh_entsize;
 } ELF32_SHDR;
 
-int kelfload(KTHREAD *th, uintptr addr, uintptr sz) {
+void memset(void *p, uint8 v, uintptr sz) {
+	uint8			*_p;
+	uintptr			x;
+	
+	_p = (uint8*)p;
+	
+	for (x = 0; x < sz; ++x) {
+		_p[x] = v;
+	}
+}
+
+int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	ELF32_EHDR			*ehdr;
 	ELF32_SHDR			*shdr;
 	uint32				x, y;
 	uintptr				page, oldpage;
 	KSTATE				*ks;
 	uint8				*fb;
+	KTHREAD				*th;
+	
 	
 	kprintf("loading elf into memory space\n");
 	
 	ks = (KSTATE*)KSTATEADDR;
-	
+		
 	ehdr = (ELF32_EHDR*)addr;
 	if (ehdr->e_machine != EM_ARM) {
 		kprintf("kelfload: not ARM machine!\n");
@@ -441,7 +532,14 @@ int kelfload(KTHREAD *th, uintptr addr, uintptr sz) {
 		return 0;
 	}
 	
-	kvmm2_init(&th->vmm);
+	if (!proc->vmm.table) {
+		kvmm2_init(&proc->vmm);
+	}
+
+	th = (KTHREAD*)kmalloc(sizeof(KTHREAD));
+	
+	ll_add((void**)&proc->threads, th);
+
 	th->pc = ehdr->e_entry;
 	th->valid = 1;
 	th->cpsr = 0x60000000 | ARM4_MODE_USER;
@@ -450,12 +548,12 @@ int kelfload(KTHREAD *th, uintptr addr, uintptr sz) {
 	/* pass address of serial output as first argument */
 	th->r0 = 0xa0000000;
 	/* map serial output mmio */
-	kvmm2_mapsingle(&th->vmm, 0xa0000000, 0x16000000, TLB_C_AP_FULLACCESS);
+	kvmm2_mapsingle(&proc->vmm, 0xa0000000, 0x16000000, TLB_C_AP_FULLACCESS);
 	/* map stack page (4K) */
-	kvmm2_allocregionat(&th->vmm, 1, 0x90000000, TLB_C_AP_FULLACCESS);
+	kvmm2_allocregionat(&proc->vmm, 1, 0x90000000, TLB_C_AP_FULLACCESS);
 
 	/* map address space so we can work directly with it */
-	kvmm2_getphy(&ks->vmm, (uintptr)th->vmm.table, &page);
+	kvmm2_getphy(&ks->vmm, (uintptr)proc->vmm.table, &page);
 	oldpage = arm4_tlbget1();
 	arm4_tlbset1(page);
 	
@@ -469,7 +567,7 @@ int kelfload(KTHREAD *th, uintptr addr, uintptr sz) {
 			// sh_offset - byte offset in module
 			// sh_size - size of section in module 
 			// sh_addr - address to load at
-			kvmm2_allocregionat(&th->vmm, kvmm2_rndup(shdr->sh_size), shdr->sh_addr, TLB_C_AP_FULLACCESS);
+			kvmm2_allocregionat(&proc->vmm, kvmm2_rndup(shdr->sh_size), shdr->sh_addr, TLB_C_AP_FULLACCESS);
 			fb = (uint8*)(addr + shdr->sh_offset);
 			/* copy */
 			for (y = 0; y < shdr->sh_size; ++y) {
@@ -518,8 +616,11 @@ void start() {
 	KVMMTABLE	test;
 	uintptr		eoiwmods;
 	KATTMOD		*m;
+	KPROCESS	*process;
 	
 	ks = (KSTATE*)KSTATEADDR;
+	
+	memset(ks, 0, sizeof(KSTATE));
 	
 	kserdbg_putc('Y');
 	
@@ -607,67 +708,7 @@ void start() {
 	for (x = 0; x < 4096; ++x) {
 		kstack_pop(&ks->tstack, &lock);
 	}
-	
-	/*
-		============ SCHEDULER TASK SETUP =============
-	*/
-	/* lets scheduler know this is going to be the first switch */
-	ks->iswitch = 1;
-	
-	for (x = 0; x < 0x10; ++x) {
-		ks->threads[x].valid = 0;
-	}
-	
-	/* this currently executing thread and stack will be discarded when these run */
-	ks->threads[0].pc = 0x80000000;
-	ks->threads[0].valid = 1;
-	ks->threads[0].cpsr = 0x60000000 | ARM4_MODE_USER;
-	ks->threads[0].sp = 0x90001000;
-	ks->threads[0].r0 = 0xa0000000;
-	
-	kprintf("CHECK ks->vmm.table:%x\n", ks->vmm.table);
-	kprintf("[\n");
-	kvmm2_init(&ks->threads[0].vmm);
-	kprintf("*\n");
-	kvmm2_mapsingle(&ks->threads[0].vmm, 0xa0000000, 0x16000000, TLB_C_AP_FULLACCESS);
-	kprintf("!\n");
-	kvmm2_allocregionat(&ks->threads[0].vmm, 1, 0x80000000, TLB_C_AP_FULLACCESS);
-	kprintf("@\n");
-	kvmm2_allocregionat(&ks->threads[0].vmm, 1, 0x90000000, TLB_C_AP_FULLACCESS);
-	kprintf("#\n");
-	kvmm2_getphy(&ks->vmm, (uintptr)ks->threads[0].vmm.table, &page);
-	kprintf("+  addr:%x  getphy:%x\n", ks->threads[0].vmm.table, page);
-	arm4_tlbset1(page);
-	//ptwalker(ks->threads[0].vmm.table);
-	//asm("mcr p15, #0, r0, c8, c7, #0");
-	kprintf("copying..\n");
-	/* copy some code there */
-	for (x = 0; x < 1024; ++x) {
-		((uint8*)0x80000000)[x] = ((uint8*)&thread1)[x];
-	}
-	kprintf("&\n");
-	
-	ks->threads[1].pc = 0x80000000;
-	ks->threads[1].valid = 1;
-	ks->threads[1].cpsr = 0x60000000 | ARM4_MODE_USER;
-	ks->threads[1].sp = 0x90001000;
-	ks->threads[1].r0 = 0xa0000000;
-	kvmm2_init(&ks->threads[1].vmm);
-	kvmm2_mapsingle(&ks->threads[1].vmm, 0xa0000000, 0x16000000, TLB_C_AP_FULLACCESS);
-	kvmm2_allocregionat(&ks->threads[1].vmm, 1, 0x80000000, TLB_C_AP_FULLACCESS);
-	kvmm2_allocregionat(&ks->threads[1].vmm, 1, 0x90000000, TLB_C_AP_FULLACCESS);
-	kvmm2_getphy(&ks->vmm, (uintptr)ks->threads[1].vmm.table, &page);
-	kprintf("----page[thread2]:%x\n", page);
-	arm4_tlbset1(page);
-	asm("mcr p15, #0, r0, c8, c7, #0");
-	/* copy some code there */
-	for (x = 0; x < 1024; ++x) {
-		((uint8*)0x80000000)[x] = ((uint8*)&thread2)[x];
-	}
-	
-	/* the first thread to run */
-	ks->threadndx = 0x0;
-	
+		
 	kserdbg_putc('Z');
 	
 	#define KMODTYPE_ELFUSER			1
@@ -678,18 +719,12 @@ void start() {
 	for (m = kPkgGetFirstMod(); m; m = kPkgGetNextMod(m)) {
 		kprintf("looking at module\n");
 		if (m->type == KMODTYPE_ELFUSER) {
-			/* find free task structure */
-			for (x = 0; x < 0x10; ++x) {
-				if (!ks->threads[x].valid) {
-					break;
-				}
-			}
-			
-			if (x >= 0x10) {
-				PANIC("out-of-task-slots");
-			}
-			
-			kelfload(&ks->threads[x], (uintptr)&m->slot[0], m->size);
+			/* create new process */
+			process = (KPROCESS*)kmalloc(sizeof(KPROCESS));
+			memset(process, 0, sizeof(KPROCESS));
+			ll_add((void**)&ks->procs, process);
+			/* will create thread in process */
+			kelfload(process, (uintptr)&m->slot[0], m->size);
 		}
 	}
 	
