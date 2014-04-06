@@ -83,29 +83,32 @@
 	asm("msr spsr, r0"); \
 	asm("pop {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12}"); \
 	asm("LDM sp!, {pc}^")
+
+#define KSWI_WAKEUP				100
+#define KSWI_SLEEP				101
+#define KSWI_YEILD				102
+	
+#define KTHREAD_SLEEPING		0x1
+#define KTHREAD_WAKEUP			0x2
 	
 typedef struct _KTHREAD {
 	struct _KTHREAD		*next;
 	struct _KTHREAD		*prev;
 	
-	uint8				valid;
+	uint32				timeout;			/* when to wakeup */
+	uint8				flags;
 	uint32				r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, sp, lr, cpsr, pc;
 } KTHREAD;
 
 typedef struct _KPROCESS {
 	struct _KPROCESS	*next;
 	struct _KPROCESS	*prev;
-
+	
 	KVMMTABLE			vmm;
 	KTHREAD				*threads;
 } KPROCESS;
 
 typedef struct _KSTATE {
-	/* process/thread support */
-	KTHREAD			threads[0x10];
-	uint8			threadndx;	
-	uint8			iswitch;
-	
 	/* new process/thread support */
 	KPROCESS		*procs;
 	KPROCESS		*cproc;

@@ -252,32 +252,34 @@ void ksched() {
 			kserdbg_puts(buf);
 		}
 		*/
-		kprintf("kt->lr:%x threadndx:%x\n", kt->lr, ks->threadndx);
+		//kprintf("kt->lr:%x\n", kt->lr);
 		/* switch to system mode get hidden registers then switch back */
 		asm("mrs r0, cpsr \n\
+			 mov r1, r0 \n\
 			 bic r0, r0, #0x1f \n\
 			 orr r0, r0, #0x1f \n\
 			 msr cpsr, r0 \n\
 			 mov %[sp], sp \n\
 			 mov %[lr], lr \n\
-			 bic r0, r0, #0x1f \n\
-			 orr r0, r0, #0x12 \n\
-			 msr cpsr, r0 \n\
+			 msr cpsr, r1 \n\
 			 " : [sp]"=r" (__sp), [lr]"=r" (__lr));
 		kt->sp = __sp;
 		kt->lr = __lr;
-		kprintf("<---threadndx:%x kt->pc:%x kt->pc:%x kt->lr:%x\n", ks->threadndx, kt->pc, kt->lr);
+		//kprintf("<---kt->pc:%x kt->pc:%x kt->lr:%x\n", kt->pc, kt->lr);
 	}
-	
+
 	if (!ks->cproc) {
 		/* initial start */
 		ks->cproc = ks->procs;
 		ks->cthread = ks->procs->threads;
-	} else {
+	}
+	
+	while (1) {
 		if (ks->cthread) {
 			/* get next thread */
 			ks->cthread = ks->cthread->next;
 		}
+		
 		/* if none get next process */
 		if (!ks->cthread) {
 			/* get next process */
@@ -295,6 +297,29 @@ void ksched() {
 				ks->cthread = 0;
 			}
 		}
+		
+		if (!ks->cthread) {
+			break;
+		}
+		
+		/* if current thread is sleeping and current thread equals last thread */
+		if ((ks->cthread->flags & KTHREAD_SLEEPING) && (ks->cthread == kt)) {
+			PANIC("all-threads-sleeping");
+		}
+		
+		/* only wakeup if it is sleeping */
+		if (ks->cthread->flags & KTHREAD_WAKEUP) {
+			if (ks->cthread->flags & KTHREAD_SLEEPING) {
+				ks->cthread->flags &= ~KTHREAD_WAKEUP;
+			}
+		}
+		
+		/* run this thread */
+		if (!(ks->cthread->flags & KTHREAD_SLEEPING)) {
+			break;
+		}
+		
+		/* thread is sleeping or not able to run */
 	}
 	
 	/* hopefully we got something or the system should deadlock */
@@ -304,7 +329,7 @@ void ksched() {
 		PANIC("no-threads");
 	}
 	
-	kprintf("--->process:%x thread:%x kt->pc:%x kt->lr:%x\n", ks->cproc, ks->cthread, kt->pc, kt->lr);
+	//kprintf("--->process:%x thread:%x kt->pc:%x kt->lr:%x\n", ks->cproc, ks->cthread, kt->pc, kt->lr);
 	/*
 		load registers
 	*/
@@ -323,17 +348,16 @@ void ksched() {
 	((uint32*)KSTACKEXC)[-13] = kt->r1;
 	((uint32*)KSTACKEXC)[-14] = kt->r0;
 	((uint32*)KSTACKEXC)[-15] = kt->cpsr;
-	kprintf("cpsr:%x\n", arm4_cpsrget());
+	//kprintf("cpsr:%x\n", arm4_cpsrget());
 	/* switch into system mode restore hidden registers then switch back */
 	asm("mrs r0, cpsr \n\
+		 mov r1, r0 \n\
 		 bic r0, r0, #0x1f \n\
 		 orr r0, r0, #0x1f \n\
 		 msr cpsr, r0 \n\
 		 mov sp, %[sp] \n\
 		 mov lr, %[lr] \n\
-		 bic r0, r0, #0x1f \n\
-		 orr r0, r0, #0x12 \n\
-		 msr cpsr, r0 \n\
+		 msr cpsr, r1 \n\
 		 " : : [sp]"r" (kt->sp), [lr]"r" (kt->lr));
 	/* set TLB table for user space (it can be zero for kernel) */
 	kvmm2_getphy(&ks->vmm, (uintptr)ks->cproc->vmm.table, &page);
@@ -350,7 +374,7 @@ void ksched() {
 	asm("mcr p15, #0, r0, c8, c7, #0");
 	
 	//arm4_tlbsetctrl(arm4_tlbgetctrl() | 0x1 | (1 << 23));
-	kprintf("ks->cproc->vmm.table:%x\n", ks->cproc->vmm.table);
+	//kprintf("ks->cproc->vmm.table:%x\n", ks->cproc->vmm.table);
 }
 
 void k_exphandler(uint32 lr, uint32 type) {
@@ -365,7 +389,8 @@ void k_exphandler(uint32 lr, uint32 type) {
 	
 	ks = (KSTATE*)KSTATEADDR;
 		
-	kserdbg_putc('H');
+	//kserdbg_putc('H');
+	//kserdbg_putc('\n');
 	
 	/*  clear interrupt in timer so it will lower its INT line
 	
@@ -377,16 +402,19 @@ void k_exphandler(uint32 lr, uint32 type) {
 	if (type == ARM4_XRQ_IRQ) {
 		picmmio = (uint32*)0x14000000;
 		
-		ksprintf(buf, "picmmio[PIC_IRQ_STATUS]:%x\n", picmmio[PIC_IRQ_STATUS]);
+		//kprintf("picmmio[PIC_IRQ_STATUS]:%x\n", picmmio[PIC_IRQ_STATUS]);
 		/*
 			It is possible that other pins are activated so we just check
 			this one bit.
+			
+			1 << 4
 		*/
-		if (picmmio[PIC_IRQ_STATUS] & 0x20) {
-			t0mmio = (uint32*)0x13000000;
+		if (picmmio[PIC_IRQ_STATUS] & (1<<6)) {
+			t0mmio = (uint32*)0x13000100;
 			t0mmio[REG_INTCLR] = 1;			/* according to the docs u can write any value */
 			
 			ksched();
+			kprintf("time:%x\n", t0mmio[REG_VALUE]);
 			/* go back through normal interrupt return process */
 			return;
 		}
@@ -398,10 +426,24 @@ void k_exphandler(uint32 lr, uint32 type) {
 	if (type == ARM4_XRQ_SWINT) {
 		swi = ((uint32*)((uintptr)lr - 4))[0] & 0xffff;
 		
-		if (swi == 4) {
-			kprintf("SWI cpsr:%x spsr:%x code:%x\n", arm4_cpsrget(), arm4_spsrget(), swi);
-		}
+		kprintf("SWI cpsr:%x spsr:%x code:%x\n", arm4_cpsrget(), arm4_spsrget(), swi);
 		
+		//((uint32*)KSTACKEXC)[-14] = R0;
+		//((uint32*)KSTACKEXC)[-13] = R1;
+		
+		switch (swi) {
+			case KSWI_WAKEUP:
+				/* wake up thread function */
+				break;
+			case KSWI_SLEEP:
+				/* thread sleep function */
+				break;
+			case KSWI_YEILD:
+				ksched();
+				break;
+			default:
+				break;
+		}
 		return;
 	}
 	
@@ -537,11 +579,12 @@ int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	}
 
 	th = (KTHREAD*)kmalloc(sizeof(KTHREAD));
+	memset(th, 0, sizeof(KTHREAD));
 	
 	ll_add((void**)&proc->threads, th);
 
 	th->pc = ehdr->e_entry;
-	th->valid = 1;
+	th->flags = 0;
 	th->cpsr = 0x60000000 | ARM4_MODE_USER;
 	/* set stack */
 	th->sp = 0x90001000;
@@ -598,6 +641,14 @@ typedef struct _KRINGBUFHDR {
 			  before data is written into the buffer
 			- consider two methods for sleeping.. one using a flag bit
 			  for the thread/process and the other using a lock
+			  
+	
+	[signal objects]
+	- kernel objects can be created by a process that are signals
+	- other processes can wait on these objects (but only the creating process can signal them)
+	- object is specified with processID:signalID
+	
+	
 */
 
 void start() {
@@ -745,14 +796,20 @@ void start() {
 	/*
 		See datasheet for timer initialization details.
 	*/
-	t0mmio = (uint32*)0x13000000;
-	t0mmio[REG_LOAD] = 0xffffff;
-	t0mmio[REG_BGLOAD] = 0xffffff;			
+	t0mmio = (uint32*)0x13000100;
+	#define KTASKSWITCH				1000
+	t0mmio[REG_LOAD] = 10000;
+	t0mmio[REG_BGLOAD] = 10000;			
 	t0mmio[REG_CTRL] = CTRL_ENABLE | CTRL_MODE_PERIODIC | CTRL_SIZE_32 | CTRL_DIV_NONE | CTRL_INT_ENABLE;
 	t0mmio[REG_INTCLR] = ~0;		/* make sure interrupt is clear (might not be mandatory) */
 	
 	kserdbg_putc('K');
 	kserdbg_putc('\n');
-	/* infinite loop */
+	/* 
+		infinite loop 
+		
+		if we wanted we could create a thread for this current executing context, and call it
+		the kernel thread, but i just let it die off (need to reclaim stack later though)
+	*/
 	for(;;);
 }
