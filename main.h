@@ -95,10 +95,17 @@
 	
 #define KTHREAD_SLEEPING		0x1
 #define KTHREAD_WAKEUP			0x2
+
+typedef struct _KRB {
+	uint32			w;
+	uint32			r;
+	uint8			d[];
+} KRB;
 	
 typedef struct _KTHREAD {
 	struct _KTHREAD		*next;
 	struct _KTHREAD		*prev;
+	
 	
 	uint64				timeout;			/* when to wakeup */
 	uint8				flags;

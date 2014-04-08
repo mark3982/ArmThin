@@ -388,7 +388,6 @@ void k_exphandler(uint32 lr, uint32 type) {
 	uint32			*t0mmio;
 	uint32			*picmmio;
 	uint32			swi;
-	char			buf[128];
 	KSTATE			*ks;
 	int				x;
 	KTHREAD			*kt;
@@ -515,26 +514,6 @@ void arm4_xrqinstall(uint32 ndx, void *addr) {
     
     v = (uint32*)0x0;
 	v[ndx] = 0xEA000000 | (((uintptr)addr - (8 + (4 * ndx))) >> 2);
-}
-
-void thread2(uintptr serdbgout) {
-	int			x;
-	
-	for (;;) {
-		for (x = 0; x < 0xfffff; ++x);
-		((uint32*)serdbgout)[0] = 'Z';
-		//asm("swi #3");
-	}
-}
-
-void thread1(uintptr serdbgout) {
-	int			x;
-	
-	for (;;) {
-		for (x = 0; x < 0xfffff; ++x);
-		((uint32*)serdbgout)[0] = 'Y';
-		//asm("swi #4");
-	}
 }
 
 typedef uint16 Elf32_Half;
