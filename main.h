@@ -91,6 +91,7 @@
 #define KSWI_WAKEUP				100
 #define KSWI_SLEEP				101
 #define KSWI_YEILD				102
+#define KSWI_GETTICKPERSECOND	103
 	
 #define KTHREAD_SLEEPING		0x1
 #define KTHREAD_WAKEUP			0x2
@@ -124,6 +125,7 @@ typedef struct _KSTATE {
 	
 	/* time management */
 	uint64			ctime;
+	uint32			tpers;			/* ticks per second */
 	
 	/* virtual memory management */
 	KVMMTABLE		vmm;			/* kernel virtual memory map */

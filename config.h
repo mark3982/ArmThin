@@ -48,6 +48,8 @@
 #define KCHKMINBLOCKSZ		(1024 * 1024)
 /* block size for 1K page stack */
 #define K1KPAGESTACKBSZ		1024
+/* max number of ticks for a task */
+#define KTASKTICKS 10000
 /*
 	============================================
 */

@@ -309,8 +309,6 @@ void ksched() {
 		
 		/* only wakeup if it is sleeping */
 		if (ks->cthread->flags & KTHREAD_SLEEPING) {
-			//kprintf("thread:%x ks->ctime:%x ", ks->cthread, ks->ctime, ks->cthread->timeout);
-			//kprintf("timeout:%x\n", ks->cthread->timeout);
 			if (ks->ctime > ks->cthread->timeout) {
 				kprintf("WOKE UP %x\n", ks->cthread);
 				/* wake up thread if passed timeout */
@@ -441,7 +439,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 	if (type == ARM4_XRQ_SWINT) {
 		swi = ((uint32*)((uintptr)lr - 4))[0] & 0xffff;
 		
-		kprintf("SWI cpsr:%x spsr:%x code:%x\n", arm4_cpsrget(), arm4_spsrget(), swi);
+		kprintf("SWI thread:%x code:%x\n", ks->cthread, swi);
 		
 		//((uint32*)KSTACKEXC)[-14] = R0;
 		//((uint32*)KSTACKEXC)[-13] = R1;
@@ -461,6 +459,9 @@ void k_exphandler(uint32 lr, uint32 type) {
 						}
 					}
 				}
+				break;
+			case KSWI_GETTICKPERSECOND:
+				((uint32*)KSTACKEXC)[-14] = ks->tpers;
 				break;
 			case KSWI_SLEEP:
 				/* thread sleep function */
@@ -593,7 +594,6 @@ int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	KSTATE				*ks;
 	uint8				*fb;
 	KTHREAD				*th;
-	
 	
 	kprintf("loading elf into memory space\n");
 	
@@ -833,10 +833,11 @@ void start() {
 		See datasheet for timer initialization details.
 	*/
 	t0mmio = (uint32*)0x13000100;
-	t0mmio[REG_LOAD] = 10000;
-	t0mmio[REG_BGLOAD] = 10000;			
+	t0mmio[REG_LOAD] = KTASKTICKS;
+	t0mmio[REG_BGLOAD] = KTASKTICKS;			
 	t0mmio[REG_CTRL] = CTRL_ENABLE | CTRL_MODE_PERIODIC | CTRL_SIZE_32 | CTRL_DIV_NONE | CTRL_INT_ENABLE;
 	t0mmio[REG_INTCLR] = ~0;		/* make sure interrupt is clear (might not be mandatory) */
+	ks->tpers = 1000000;
 	
 	kserdbg_putc('K');
 	kserdbg_putc('\n');
