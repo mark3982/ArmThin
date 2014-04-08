@@ -5,10 +5,10 @@ int _start(unsigned int *smmio) {
 	
 	for (;;) {
 		for (x = 0; x < 0xfffff; ++x);
-		smmio[0] = 'G';
-		smmio[0] = 'K';
+		smmio[0] = 'A';
 		
-		//asm("swi #102");
+		asm("	mov r0, #0xffffff \n\
+				swi #101");
 	}
 	return 0;
 }

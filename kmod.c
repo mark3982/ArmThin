@@ -7,11 +7,12 @@ extern uint8 _EOI;
 */
 KATTMOD *kPkgGetNextMod(KATTMOD *mod) {
 	KATTMOD		*n;
-
-	n = (KATTMOD*)((uintptr)mod + mod->size);
+	
+	n = (KATTMOD*)((uintptr)mod + mod->size + sizeof(KATTMOD));
 	
 	/* make sure there actually exists another module after this one */
 	if (n->signatureA != 0x12345678 || ~n->signatureA != n->signatureB) {
+		kprintf("next mod not found %x %x\n", n->signatureA, n->signatureB);
 		return 0;
 	}
 	

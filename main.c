@@ -308,9 +308,18 @@ void ksched() {
 		}
 		
 		/* only wakeup if it is sleeping */
-		if (ks->cthread->flags & KTHREAD_WAKEUP) {
-			if (ks->cthread->flags & KTHREAD_SLEEPING) {
-				ks->cthread->flags &= ~KTHREAD_WAKEUP;
+		if (ks->cthread->flags & KTHREAD_SLEEPING) {
+			//kprintf("thread:%x ks->ctime:%x ", ks->cthread, ks->ctime, ks->cthread->timeout);
+			//kprintf("timeout:%x\n", ks->cthread->timeout);
+			if (ks->ctime > ks->cthread->timeout) {
+				kprintf("WOKE UP %x\n", ks->cthread);
+				/* wake up thread if passed timeout */
+				ks->cthread->flags &= ~KTHREAD_SLEEPING;
+			}
+			
+			/* wakeup thread is set to be woken up */
+			if (ks->cthread->flags & KTHREAD_WAKEUP) {
+				ks->cthread->flags &= ~(KTHREAD_WAKEUP | KTHREAD_SLEEPING);
 			}
 		}
 		
@@ -348,7 +357,7 @@ void ksched() {
 	((uint32*)KSTACKEXC)[-13] = kt->r1;
 	((uint32*)KSTACKEXC)[-14] = kt->r0;
 	((uint32*)KSTACKEXC)[-15] = kt->cpsr;
-	//kprintf("cpsr:%x\n", arm4_cpsrget());
+	//kprintf("switch-to thread:%x pc:%x\n", kt, kt->pc);
 	/* switch into system mode restore hidden registers then switch back */
 	asm("mrs r0, cpsr \n\
 		 mov r1, r0 \n\
@@ -386,6 +395,9 @@ void k_exphandler(uint32 lr, uint32 type) {
 	int				x;
 	KTHREAD			*kt;
 	uintptr			out;
+	uint32			r0, r1;
+	KPROCESS		*proc;
+	KTHREAD			*th;
 	
 	ks = (KSTATE*)KSTATEADDR;
 		
@@ -413,8 +425,11 @@ void k_exphandler(uint32 lr, uint32 type) {
 			t0mmio = (uint32*)0x13000100;
 			t0mmio[REG_INTCLR] = 1;			/* according to the docs u can write any value */
 			
+			//kprintf("t0mmio[REG_BGLOAD]:%x ks->ctime:%x\n", t0mmio[REG_BGLOAD], ks->ctime);
+			ks->ctime += t0mmio[REG_BGLOAD];
+			
 			ksched();
-			kprintf("time:%x\n", t0mmio[REG_VALUE]);
+			//kprintf("time:%x\n", t0mmio[REG_VALUE]);
 			/* go back through normal interrupt return process */
 			return;
 		}
@@ -434,9 +449,30 @@ void k_exphandler(uint32 lr, uint32 type) {
 		switch (swi) {
 			case KSWI_WAKEUP:
 				/* wake up thread function */
+				r0 = ((uint32*)KSTACKEXC)[-14];
+				r1 = ((uint32*)KSTACKEXC)[-13];
+				for (proc = ks->procs; proc; proc = proc->next) {
+					if ((uint32)proc == r0) {
+						for (th = proc->threads; th; th = th->next) {
+							if ((uint32)th == r1) {
+								/* wake up thread */
+								th->flags |= KTHREAD_WAKEUP;
+							}
+						}
+					}
+				}
 				break;
 			case KSWI_SLEEP:
 				/* thread sleep function */
+				r0 = ((uint32*)KSTACKEXC)[-14];
+				
+				kprintf("SLEEPING thread:%x timeout:%x\n", ks->cthread, r0);
+
+				if (ks->cthread) {
+					ks->cthread->flags |= KTHREAD_SLEEPING;
+					ks->cthread->timeout = r0 + ks->ctime;
+				}
+				ksched();
 				break;
 			case KSWI_YEILD:
 				ksched();
@@ -797,7 +833,6 @@ void start() {
 		See datasheet for timer initialization details.
 	*/
 	t0mmio = (uint32*)0x13000100;
-	#define KTASKSWITCH				1000
 	t0mmio[REG_LOAD] = 10000;
 	t0mmio[REG_BGLOAD] = 10000;			
 	t0mmio[REG_CTRL] = CTRL_ENABLE | CTRL_MODE_PERIODIC | CTRL_SIZE_32 | CTRL_DIV_NONE | CTRL_INT_ENABLE;

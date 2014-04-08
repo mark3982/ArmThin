@@ -8,4 +8,5 @@ arm-eabi-gcc -s -I../inc -nostdlib -nostartfiles -ffreestanding -std=gnu99 -c km
 arm-eabi-ld -T link.ld -o __armos.bin main.o kheap_bm.o xarmdiv.o vmm.o dbgout.o kmod.o
 echo doing object copy..
 arm-eabi-objcopy -j .text -O binary __armos.bin armos.bin
+./attachmod.py ./modules/fs/fs ./armos.bin 1
 ./attachmod.py ./modules/testuelf/main ./armos.bin 1

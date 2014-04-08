@@ -62,9 +62,13 @@
 	asm("mov sp, %[ps]" : : [ps]"i" (KSTACKEXC)); \
 	asm("push {lr}"); \
 	asm("push {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12}"); \
+	asm("mrs r0, spsr"); \
+	asm("push {r0}"); \
 	asm("mov %[ps], lr" : [ps]"=r" (lr));	
 
 #define KEXP_BOTSWI \
+	asm("pop {r0}"); \
+	asm("msr spsr, r0"); \
 	asm("pop {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12}"); \
 	asm("LDM sp!, {pc}^")
 		 
@@ -95,7 +99,7 @@ typedef struct _KTHREAD {
 	struct _KTHREAD		*next;
 	struct _KTHREAD		*prev;
 	
-	uint32				timeout;			/* when to wakeup */
+	uint64				timeout;			/* when to wakeup */
 	uint8				flags;
 	uint32				r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, sp, lr, cpsr, pc;
 } KTHREAD;
@@ -117,6 +121,9 @@ typedef struct _KSTATE {
 	/* physical and heap memory management */
 	KHEAPBM			hphy;			/* kernel physical page heap */
 	KHEAPBM			hchk;			/* data chunk heap */
+	
+	/* time management */
+	uint64			ctime;
 	
 	/* virtual memory management */
 	KVMMTABLE		vmm;			/* kernel virtual memory map */
