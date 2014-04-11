@@ -94,7 +94,7 @@ int kstack_init(KSTACK *stack, uintptr lowaddr) {
 }
 
 uintptr kvmm2_rndup(uintptr sz) {
-	return (sz / 4096) * 4096 < sz ? (sz / 4096) + 1 : sz / 4096;
+	return (sz / 4096) * 4096 != sz ? (sz / 4096) + 1 : sz / 4096;
 }
 
 int kvmm2_revset(uintptr p, uint32 v, uint8 opt) {
@@ -236,9 +236,6 @@ int kvmm2_get1Ktable(uintptr *o, uint32 flags) {
 				if (!kvmm2_getu4k(&ks->vmm, (uintptr*)&vtaddr, flags)) {
 					PANIC("getu4k-failed");
 				}
-				for (x = 0; x < 256; ++x) {
-					vtaddr[x] = 0;
-				}
 				/* set reverse map */
 				kvmm2_revset((uintptr)ptaddr, (uintptr)vtaddr, 0);
 				/* map page into space */
@@ -249,9 +246,6 @@ int kvmm2_get1Ktable(uintptr *o, uint32 flags) {
 				latemap = 1;
 				lm_ptaddr = (uintptr)ptaddr;
 				lm_vtaddr = (uintptr)vtaddr;
-				for (x = 0; x < 256; ++x) {
-					vtaddr[x] = 0;
-				}
 			}
 			
 			/* clear the table */
@@ -296,6 +290,7 @@ int kvmm2_get1Ktable(uintptr *o, uint32 flags) {
 	}
 	// pop one (return value)
 	kstack_pop(&ks->tstack, (uint32*)o);
+	//kprintf("1KTable:%x\n", *o);
 	return 1; 
 }
 
@@ -310,15 +305,19 @@ int kvmm2_getphy(KVMMTABLE *vmm, uintptr v, uintptr *o) {
 	
 	/* get sub table physical address */
 	t = (uint32*)(t[v >> 20] & ~0x3ff);
+	//kprintf("st:%x\n", t);
 	/* do reverse lookup to get virtual address */
 	t = (uint32*)kvmm2_revget((uintptr)t, 0);
+	//kprintf("st-rev:%x\n", t);
 	/* get index into subtable, then drop flags off end of entry */
 	/* 
 		also keep lower 12 bits of v address because we assume
 		that they want the physical address not the actual physical
 		page address
 	*/
+	//kprintf("t[(v >> 12) & 0xff]:%x\n", t[(v >> 12) & 0xff]);
 	*o = (t[(v >> 12) & 0xff] & ~0xfff) | (v & 0xfff); 
+	//kprintf("exit\n");
 	return 1;
 }
 
@@ -396,7 +395,7 @@ int kvmm2_allocregion(KVMMTABLE *vmm, uintptr pcnt, uintptr low, uintptr high, u
 			PANIC("map-single-failed");
 			return 0;
 		}
-		//kprintf("mapped %x -> %x\n", out[0] + x * 0x1000, p);
+		kprintf("mapped %x -> %x\n", out[0] + x * 0x1000, p);
 	}
 	
 	return 1;
@@ -426,6 +425,7 @@ int kvmm2_mapsingle(KVMMTABLE *vmm, uintptr v, uintptr p, uint32 flags) {
 	}
 	
 	if ((t[v >> 20] & 3) == 0) {
+		kprintf("using 1k table %x\n", st);
 		/* update coarse table entries (ONLY for kernel space) */
 		if (ks->vmm.table == t) {
 			ks->vmm_ucte += 256;

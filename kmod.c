@@ -12,7 +12,6 @@ KATTMOD *kPkgGetNextMod(KATTMOD *mod) {
 	
 	/* make sure there actually exists another module after this one */
 	if (n->signatureA != 0x12345678 || ~n->signatureA != n->signatureB) {
-		kprintf("next mod not found %x %x\n", n->signatureA, n->signatureB);
 		return 0;
 	}
 	

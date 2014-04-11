@@ -95,17 +95,11 @@
 	
 #define KTHREAD_SLEEPING		0x1
 #define KTHREAD_WAKEUP			0x2
-
-typedef struct _KRB {
-	uint32			w;
-	uint32			r;
-	uint8			d[];
-} KRB;
+#define KTHREAD_KIDLE			0x4
 	
 typedef struct _KTHREAD {
 	struct _KTHREAD		*next;
 	struct _KTHREAD		*prev;
-	
 	
 	uint64				timeout;			/* when to wakeup */
 	uint8				flags;
@@ -125,6 +119,8 @@ typedef struct _KSTATE {
 	KPROCESS		*procs;
 	KPROCESS		*cproc;
 	KTHREAD			*cthread;
+	KTHREAD			*idleth;
+	KPROCESS		*idleproc;
 	
 	/* physical and heap memory management */
 	KHEAPBM			hphy;			/* kernel physical page heap */

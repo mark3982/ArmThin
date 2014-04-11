@@ -214,6 +214,13 @@ void ll_rem(void **p, void *i) {
 	}
 }
 
+void kdumpthreadinfo(KTHREAD *th) {
+	kprintf("r0:%x\tr1:%x\tr2:%x\tr3:%x\n", th->r0, th->r1, th->r2, th->r3);
+	kprintf("r4:%x\tr5:%x\tr6:%x\tr7:%x\n", th->r4, th->r5, th->r6, th->r7);
+	kprintf("r8:%x\tr9:%x\tr10:%x\tr11:%x\n", th->r8, th->r9, th->r10, th->r11);
+	kprintf("r12:%x\tsp:%x\tlr:%x\tcpsr:%x\n", th->r12, th->sp, th->lr, th->cpsr);
+}
+
 void ksched() {
 	KSTATE			*ks;
 	KTHREAD			*kt;
@@ -244,15 +251,6 @@ void ksched() {
 		kt->r1 = ((uint32*)KSTACKEXC)[-13];
 		kt->r0 = ((uint32*)KSTACKEXC)[-14];
 		kt->cpsr = ((uint32*)KSTACKEXC)[-15];
-		/*
-		stack viewer
-		
-		for (x = 0; x < 16; ++x) {
-			ksprintf(buf, "stack[%x]:%x\n", x, ((uint32*)KSTACKEXC)[-x]);
-			kserdbg_puts(buf);
-		}
-		*/
-		//kprintf("kt->lr:%x\n", kt->lr);
 		/* switch to system mode get hidden registers then switch back */
 		asm("mrs r0, cpsr \n\
 			 mov r1, r0 \n\
@@ -265,7 +263,6 @@ void ksched() {
 			 " : [sp]"=r" (__sp), [lr]"=r" (__lr));
 		kt->sp = __sp;
 		kt->lr = __lr;
-		//kprintf("<---kt->pc:%x kt->pc:%x kt->lr:%x\n", kt->pc, kt->lr);
 	}
 
 	if (!ks->cproc) {
@@ -309,34 +306,30 @@ void ksched() {
 		
 		/* only wakeup if it is sleeping */
 		if (ks->cthread->flags & KTHREAD_SLEEPING) {
-			if (ks->ctime > ks->cthread->timeout) {
-				kprintf("WOKE UP %x\n", ks->cthread);
+			if (ks->cthread->timeout > 0 && ks->ctime > ks->cthread->timeout) {
+				//kprintf("WOKE UP (timeout) %x\n", ks->cthread);
 				/* wake up thread if passed timeout */
 				ks->cthread->flags &= ~KTHREAD_SLEEPING;
+				ks->cthread->r0 = 0;
+				break;
 			}
 			
 			/* wakeup thread is set to be woken up */
 			if (ks->cthread->flags & KTHREAD_WAKEUP) {
+				//kprintf("WOKE UP (signal) %x\n", ks->cthread);
 				ks->cthread->flags &= ~(KTHREAD_WAKEUP | KTHREAD_SLEEPING);
+				ks->cthread->r0 = ks->ctime - ks->cthread->timeout;
+				break;
 			}
-		}
-		
-		/* run this thread */
-		if (!(ks->cthread->flags & KTHREAD_SLEEPING)) {
+		} else {
+			/* run this thread */
 			break;
 		}
-		
 		/* thread is sleeping or not able to run */
 	}
 	
 	/* hopefully we got something or the system should deadlock */
 	kt = ks->cthread;
-	
-	if (!kt) {
-		PANIC("no-threads");
-	}
-	
-	//kprintf("--->process:%x thread:%x kt->pc:%x kt->lr:%x\n", ks->cproc, ks->cthread, kt->pc, kt->lr);
 	/*
 		load registers
 	*/
@@ -355,7 +348,6 @@ void ksched() {
 	((uint32*)KSTACKEXC)[-13] = kt->r1;
 	((uint32*)KSTACKEXC)[-14] = kt->r0;
 	((uint32*)KSTACKEXC)[-15] = kt->cpsr;
-	//kprintf("switch-to thread:%x pc:%x\n", kt, kt->pc);
 	/* switch into system mode restore hidden registers then switch back */
 	asm("mrs r0, cpsr \n\
 		 mov r1, r0 \n\
@@ -380,8 +372,33 @@ void ksched() {
 	*/
 	asm("mcr p15, #0, r0, c8, c7, #0");
 	
-	//arm4_tlbsetctrl(arm4_tlbgetctrl() | 0x1 | (1 << 23));
-	//kprintf("ks->cproc->vmm.table:%x\n", ks->cproc->vmm.table);
+	//kprintf("SWITCH-TO thread:%x cpsr:%x fp:%x sp:%x pc:%x\n", kt, kt->cpsr, kt->r11, kt->sp, kt->pc);
+	
+	uint32			*p;
+	
+	if (!kvmm2_getphy(&ks->cproc->vmm, 0x90000000, (uintptr*)&p)) {
+		//kprintf("NO STACK EXISTS??\n");
+	} else {
+		//kprintf("writing to stack..%x\n", kt->sp);
+		//((uint32*)kt->sp)[-1] = 0xbb;
+	}
+	
+	if (kvmm2_getphy(&ks->cproc->vmm, 0x80000000, (uintptr*)&p)) {
+		uint32			x;
+		
+		//kprintf("CODE PAGE :%x\n", p);
+		
+		p = (uint32*)(0x80000000);
+
+		//((uint32*)KSTACKEXC)[-1] = 0x80000800;
+	
+		//for (x = 0; x < 1024; ++x) {
+		//	p[x] = 0xeafffffe;
+		//}
+	
+	} else {
+		//kprintf("CODE PAGE????\n");
+	}
 }
 
 void k_exphandler(uint32 lr, uint32 type) {
@@ -438,7 +455,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 	if (type == ARM4_XRQ_SWINT) {
 		swi = ((uint32*)((uintptr)lr - 4))[0] & 0xffff;
 		
-		kprintf("SWI thread:%x code:%x\n", ks->cthread, swi);
+		//kprintf("SWI thread:%x code:%x\n", ks->cthread, swi);
 		
 		//((uint32*)KSTACKEXC)[-14] = R0;
 		//((uint32*)KSTACKEXC)[-13] = R1;
@@ -466,7 +483,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 				/* thread sleep function */
 				r0 = ((uint32*)KSTACKEXC)[-14];
 				
-				kprintf("SLEEPING thread:%x timeout:%x\n", ks->cthread, r0);
+				//kprintf("SLEEPING thread:%x timeout:%x\n", ks->cthread, r0);
 
 				if (ks->cthread) {
 					ks->cthread->flags |= KTHREAD_SLEEPING;
@@ -489,12 +506,18 @@ void k_exphandler(uint32 lr, uint32 type) {
 			correct offset. I am using the same return for everything except SWI, 
 			which requires that LR not be offset before return.
 		*/
-		kprintf("!EXCEPTION\n");
-		kprintf("cproc:%x cthread:%x lr:%x\n", ks->cproc, ks->cthread, lr);
+		KTHREAD			*tmp;
 		
+		tmp = ks->cthread;
+		
+		kprintf("!EXCEPTION\n");
+		kprintf("type:%x cproc:%x cthread:%x lr:%x\n", type, ks->cproc, ks->cthread, lr);
+		for (;;);
 		ll_rem((void**)&ks->cproc->threads, ks->cthread);
-		ks->cthread = 0;
+		ks->cthread = ks->cthread->next;
 		ksched();
+		
+		kdumpthreadinfo(tmp);
 	}
 	
 	return;
@@ -595,14 +618,13 @@ int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 
 	th = (KTHREAD*)kmalloc(sizeof(KTHREAD));
 	memset(th, 0, sizeof(KTHREAD));
-	
 	ll_add((void**)&proc->threads, th);
 
 	th->pc = ehdr->e_entry;
 	th->flags = 0;
 	th->cpsr = 0x60000000 | ARM4_MODE_USER;
 	/* set stack */
-	th->sp = 0x90001000;
+	th->sp = 0x90000800;
 	/* pass address of serial output as first argument */
 	th->r0 = 0xa0000000;
 	/* map serial output mmio */
@@ -614,6 +636,7 @@ int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	kvmm2_getphy(&ks->vmm, (uintptr)proc->vmm.table, &page);
 	oldpage = arm4_tlbget1();
 	arm4_tlbset1(page);
+	asm("mcr p15, #0, r0, c8, c7, #0");
 	
 	// e_shoff - section table offset
 	// e_shentsize - size of each section entry
@@ -628,43 +651,46 @@ int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 			kvmm2_allocregionat(&proc->vmm, kvmm2_rndup(shdr->sh_size), shdr->sh_addr, TLB_C_AP_FULLACCESS);
 			fb = (uint8*)(addr + shdr->sh_offset);
 			/* copy */
+			//kprintf("    elf copying\n");
 			for (y = 0; y < shdr->sh_size; ++y) {
 				((uint8*)shdr->sh_addr)[y] = fb[y];
+				//kprintf("    @:%x:%x:%x\n", shdr->sh_addr + y, fb[y], ((uint8*)shdr->sh_addr)[y]);
 			}
+			//kprintf("    done\n");
+			//for (y = 0; y < 0x6ffffff; ++y);
 		}
 	}
 	
 	/* restore previous address space */
 	arm4_tlbset1(oldpage);
+	asm("mcr p15, #0, r0, c8, c7, #0");
 }
 
-typedef struct _KRINGBUFHDR {
-	uint32				r;
-	uint32				w;
-} RINGBUFHDR;
+int ksleep(uint32 timeout) {
+	int			result;
+	
+	asm("	mov r0, %[in] \n\
+			swi #101 \n\
+			mov %[result], r0 \n\
+		" : [result]"=r" (result) : [in]"r" (timeout));
+	/* convert from ticks */
+	return result;
+}
 
-/*
-	the writer can write if r==w
-	the writer has to wait if w < r and sz > (r - w)
-    the writer has to wait if w >= r and ((mask - w) + r) < sz
+void kthread(KTHREAD *th) {
+	uint32			x;
 	
-	the reader has to wait if r == w
-	the reader can read during any other condition
-	
-	POINTS
-			- research memory barrier to prevent modification of index
-			  before data is written into the buffer
-			- consider two methods for sleeping.. one using a flag bit
-			  for the thread/process and the other using a lock
-			  
-	
-	[signal objects]
-	- kernel objects can be created by a process that are signals
-	- other processes can wait on these objects (but only the creating process can signal them)
-	- object is specified with processID:signalID
-	
-	
-*/
+	for (;;) {
+		ksleep(0xffff);
+		kserdbg_putc('$');
+	}
+}
+
+void kidle() {
+	for (;;) {
+		asm("swi #102");
+	}
+}
 
 void start() {
 	uint32		*t0mmio;
@@ -683,6 +709,7 @@ void start() {
 	uintptr		eoiwmods;
 	KATTMOD		*m;
 	KPROCESS	*process;
+	KTHREAD		*th;
 	
 	ks = (KSTATE*)KSTATEADDR;
 	
@@ -776,6 +803,33 @@ void start() {
 	}
 		
 	kserdbg_putc('Z');
+	
+	process = (KPROCESS*)kmalloc(sizeof(KPROCESS));
+	memset(process, 0, sizeof(KPROCESS));
+	kvmm2_init(&process->vmm);
+	ll_add((void**)&ks->procs, process);
+	
+	th = (KTHREAD*)kmalloc(sizeof(KTHREAD));
+	memset(th, 0, sizeof(KTHREAD));
+	ll_add((void**)&process->threads, th);
+	th->pc = (uintptr)&kthread;
+	th->flags = 0;
+	th->cpsr = 0x60000000 | ARM4_MODE_SYS;
+	/* set stack */
+	th->sp = (uintptr)kmalloc(1024 * 2) + 1024 * 2 - 8;
+	th->r0 = (uint32)th;
+
+	th = (KTHREAD*)kmalloc(sizeof(KTHREAD));
+	memset(th, 0, sizeof(KTHREAD));
+	ll_add((void**)&process->threads, th);
+	th->pc = (uintptr)&kidle;
+	th->flags = KTHREAD_KIDLE;
+	th->cpsr = 0x60000000 | ARM4_MODE_SYS;
+	/* set stack (dont need anything big for idle thread at the moment) */
+	th->sp = (uintptr)kmalloc(128) + 128 - 8;
+	th->r0 = (uint32)th;
+	ks->idleth = th;
+	ks->idleproc = process;
 	
 	#define KMODTYPE_ELFUSER			1
 	/*
