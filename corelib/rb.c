@@ -1,4 +1,12 @@
 #include "core.h"
+#include "rb.h"
+
+/* this code is shared between kernel and corelib for userspace */
+#ifdef KERNEL
+#define printf kprintf
+#else
+#define printf printf
+#endif
 
 /*
 	This will write a message.
@@ -11,9 +19,13 @@ int rb_write_nbio(RBM volatile *rbm, void *p, uint32 sz) {
 	uint8	x, y;
 	
 	rb = rbm->rb;
+	
+	printf("@1\n");
+	printf("@2 %x\n", rb);
+	
 	r = RB_LMT(rb->w, rbm->sz);
 	w = RB_LMT(rb->r, rbm->sz);
-
+	
 	/* not enough space */
 	if (w < r && (w + sz) >= r) {
 		return 0;

@@ -512,9 +512,16 @@ void k_exphandler(uint32 lr, uint32 type) {
 		
 		kprintf("!EXCEPTION\n");
 		kprintf("type:%x cproc:%x cthread:%x lr:%x\n", type, ks->cproc, ks->cthread, lr);
+
+		if (lr >= (uintptr)&_BOI && lr <= (uintptr)&_EOI) {
+			PANIC("CRITICAL FAILURE: exception in kernel image\n");
+		}
+		
 		for (;;);
+		
 		ll_rem((void**)&ks->cproc->threads, ks->cthread);
 		ks->cthread = ks->cthread->next;
+		
 		ksched();
 		
 		kdumpthreadinfo(tmp);
@@ -596,6 +603,7 @@ int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	KSTATE				*ks;
 	uint8				*fb;
 	KTHREAD				*th;
+	uintptr				out;
 	
 	kprintf("loading elf into memory space\n");
 	
@@ -631,12 +639,28 @@ int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	kvmm2_mapsingle(&proc->vmm, 0xa0000000, 0x16000000, TLB_C_AP_FULLACCESS);
 	/* map stack page (4K) */
 	kvmm2_allocregionat(&proc->vmm, 1, 0x90000000, TLB_C_AP_FULLACCESS);
-
+	/* create thread communication (ring buffers) */
+	kvmm2_allocregion(&proc->vmm, 1, KMEMSIZE, 0, TLB_C_AP_FULLACCESS, &out);
+	th->krx.rb = (RB*)out;
+	th->krx.sz = KVIRPAGESIZE >> 1;			/* should be 2KB */
+	th->ktx.rb = (RB*)(out + (KVIRPAGESIZE >> 1));
+	th->ktx.sz = KVIRPAGESIZE >> 1;			/* should be 2KB */
+	
 	/* map address space so we can work directly with it */
 	kvmm2_getphy(&ks->vmm, (uintptr)proc->vmm.table, &page);
 	oldpage = arm4_tlbget1();
 	arm4_tlbset1(page);
+	/* flush TLB */
 	asm("mcr p15, #0, r0, c8, c7, #0");
+	
+	/* clear RB structures */
+	memset(th->krx.rb, 0, sizeof(RB));
+	memset(th->ktx.rb, 0, sizeof(RB));
+	
+	/* pass the arguments */
+	th->r0 = (uint32)th->krx.rb;
+	th->r1 = (uint32)th->ktx.rb;
+	th->r2 = KVIRPAGESIZE >> 1;
 	
 	// e_shoff - section table offset
 	// e_shentsize - size of each section entry
@@ -663,6 +687,7 @@ int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	
 	/* restore previous address space */
 	arm4_tlbset1(oldpage);
+	/* flush TLB */
 	asm("mcr p15, #0, r0, c8, c7, #0");
 }
 

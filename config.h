@@ -1,5 +1,6 @@
 #ifndef CONFIG_H
 #define CONFIG_H
+#define KERNEL
 /*
 	============== CONFIGURATION =============
 */
@@ -42,6 +43,8 @@
 #define KMEMSIZE	(0x1000000 << (8 - KMEMINDEX))
 /* the size of a physical memory page */
 #define KPHYPAGESIZE		1024
+/* the size of a virtual page */
+#define KVIRPAGESIZE		4096
 /* the block size of the chunk heap (kmalloc, kfree) */
 #define KCHKHEAPBSIZE		16
 /* minimum block size for chunk heap */

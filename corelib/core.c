@@ -1,8 +1,22 @@
 #include "core.h"
+#include "rb.h"
 
 #define SERIAL_BASE 0xa0000000
 #define SERIAL_FLAG_REGISTER 0x18
 #define SERIAL_BUFFER_FULL (1 << 5)
+
+static unsigned long int next = 1;
+ 
+int rand()
+{
+    next = next * 1103515245 + 12345;
+    return (unsigned int)(next / 65536) % 32768;
+}
+
+void srand(unsigned int seed)
+{
+    next = seed;
+}
 
 static void kserdbg_putc(char c) {
     while (*(volatile unsigned long*)(SERIAL_BASE + SERIAL_FLAG_REGISTER) & (SERIAL_BUFFER_FULL));
@@ -179,6 +193,8 @@ void __attribute__((naked)) _start() {
 //int rb_read_bio(RBM volatile *rbm, void *p, uint32 *sz, uint32 *advance, uint32 timeout) {
 void _start(uint32 rxaddr, uint32 txaddr, uint32 txrxsz) {
 	/* setup meta data (outside shared memory / ring buffer) for protected fields */
+	printf("rxaddr:%x txaddr:%x txrxsz:%x\n", rxaddr, txaddr, txrxsz);
+	
 	__corelib_rx.sz = txrxsz;
 	__corelib_rx.rb = (RB*)rxaddr;
 	__corelib_tx.sz = txrxsz;

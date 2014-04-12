@@ -5,6 +5,7 @@
 #include "vmm.h"
 #include "kheap.h"
 #include "dbgout.h"
+#include "corelib/rb.h"
 
 #define ARM4_XRQ_RESET   0x00
 #define ARM4_XRQ_UNDEF   0x01
@@ -100,9 +101,16 @@
 typedef struct _KTHREAD {
 	struct _KTHREAD		*next;
 	struct _KTHREAD		*prev;
+
+	/* thread kernel communication */
+	RBM					krx;
+	RBM					ktx;
 	
+	/* thread control */
 	uint64				timeout;			/* when to wakeup */
 	uint8				flags;
+	
+	/* thread register state */
 	uint32				r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, sp, lr, cpsr, pc;
 } KTHREAD;
 
