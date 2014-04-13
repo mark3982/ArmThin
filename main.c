@@ -307,7 +307,7 @@ void ksched() {
 		/* only wakeup if it is sleeping */
 		if (ks->cthread->flags & KTHREAD_SLEEPING) {
 			if (ks->cthread->timeout > 0 && ks->ctime > ks->cthread->timeout) {
-				//kprintf("WOKE UP (timeout) %x\n", ks->cthread);
+				//kprintf("WOKE UP (timeout) %x %x\n", ks->cthread, ks->cthread->timeout);
 				/* wake up thread if passed timeout */
 				ks->cthread->flags &= ~KTHREAD_SLEEPING;
 				ks->cthread->r0 = 0;
@@ -483,16 +483,22 @@ void k_exphandler(uint32 lr, uint32 type) {
 				/* thread sleep function */
 				r0 = ((uint32*)KSTACKEXC)[-14];
 				
-				//kprintf("SLEEPING thread:%x timeout:%x\n", ks->cthread, r0);
+				//kprintf("SLEEPING thread:%x timeout:%x flags:%x\n", ks->cthread, r0, ks->cthread->flags);
 
-				if (ks->cthread) {
-					ks->cthread->flags |= KTHREAD_SLEEPING;
+				ks->cthread->flags |= KTHREAD_SLEEPING;
+				if (r0 != 0) {
 					ks->cthread->timeout = r0 + ks->ctime;
+				} else {
+					ks->cthread->timeout = 0;
 				}
+
 				ksched();
 				break;
 			case KSWI_YEILD:
 				ksched();
+				break;
+			case KSWI_KERNELMSG:
+				ks->kservthread->flags |= KTHREAD_WAKEUP;
 				break;
 			default:
 				break;
@@ -603,7 +609,7 @@ int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	KSTATE				*ks;
 	uint8				*fb;
 	KTHREAD				*th;
-	uintptr				out;
+	uintptr				out, out2;
 	
 	kprintf("loading elf into memory space\n");
 	
@@ -633,18 +639,30 @@ int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	th->cpsr = 0x60000000 | ARM4_MODE_USER;
 	/* set stack */
 	th->sp = 0x90000800;
-	/* pass address of serial output as first argument */
-	th->r0 = 0xa0000000;
 	/* map serial output mmio */
 	kvmm2_mapsingle(&proc->vmm, 0xa0000000, 0x16000000, TLB_C_AP_FULLACCESS);
 	/* map stack page (4K) */
 	kvmm2_allocregionat(&proc->vmm, 1, 0x90000000, TLB_C_AP_FULLACCESS);
-	/* create thread communication (ring buffers) */
-	kvmm2_allocregion(&proc->vmm, 1, KMEMSIZE, 0, TLB_C_AP_FULLACCESS, &out);
+	
+	/* --- ALLOC RING BUFFER INTO KERNEL SERVER THREAD PROCESS FIRST --- */
+	kvmm2_allocregion(&ks->kservproc->vmm, 1, KMEMSIZE, 0, TLB_C_AP_PRIVACCESS, &out);
+	kprintf("KSERV VIRTPAGE:%x\n", out);
 	th->krx.rb = (RB*)out;
-	th->krx.sz = KVIRPAGESIZE >> 1;			/* should be 2KB */
+	th->krx.sz = (KVIRPAGESIZE >> 1) - sizeof(RB);			/* should be 2KB */
 	th->ktx.rb = (RB*)(out + (KVIRPAGESIZE >> 1));
-	th->ktx.sz = KVIRPAGESIZE >> 1;			/* should be 2KB */
+	th->ktx.sz = (KVIRPAGESIZE >> 1) - sizeof(RB);			/* should be 2KB */
+	
+	/* --- MAP RING BUFFER INTO USERSPACE OF THREAD PROCESS */
+	/* find unused appropriate sized region in thread's address space */
+	kvmm2_findregion(&proc->vmm, 1, KMEMSIZE, 0, 0, &out);
+	kprintf("VIRTPAGE:%x\n", out);
+	/* map that region to the same physical pages used in kernel server address space */
+	kvmm2_getphy(&ks->kservproc->vmm, (uintptr)th->krx.rb, &out2);
+	kprintf("PHYPAGE:%x\n", out2);
+	kvmm2_mapsingle(&proc->vmm, out, out2, TLB_C_AP_FULLACCESS);
+	/* set userspace pointers for thread to appropriate values */
+	th->urx = (RB*)out;
+	th->utx = (RB*)(out + (KVIRPAGESIZE >> 1));;
 	
 	/* map address space so we can work directly with it */
 	kvmm2_getphy(&ks->vmm, (uintptr)proc->vmm.table, &page);
@@ -654,13 +672,13 @@ int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	asm("mcr p15, #0, r0, c8, c7, #0");
 	
 	/* clear RB structures */
-	memset(th->krx.rb, 0, sizeof(RB));
-	memset(th->ktx.rb, 0, sizeof(RB));
+	memset(th->urx, 0, sizeof(RB));
+	memset(th->utx, 0, sizeof(RB));
 	
 	/* pass the arguments */
-	th->r0 = (uint32)th->krx.rb;
-	th->r1 = (uint32)th->ktx.rb;
-	th->r2 = KVIRPAGESIZE >> 1;
+	th->r0 = (uint32)th->urx;
+	th->r1 = (uint32)th->utx;
+	th->r2 = (KVIRPAGESIZE >> 1) - sizeof(RB);
 	
 	// e_shoff - section table offset
 	// e_shentsize - size of each section entry
@@ -702,12 +720,79 @@ int ksleep(uint32 timeout) {
 	return result;
 }
 
-void kthread(KTHREAD *th) {
+static uint32 rand(uint32 next)
+{
+    next = next * 1103515245 + 12345;
+    return (uint32)(next / 65536) % 32768;
+}
+
+void kthread(KTHREAD *myth) {
 	uint32			x;
+	KPROCESS		*proc;
+	KTHREAD			*th;
+	KSTATE			*ks;
+	uint8			pkt[128];
+	uint32			sz;
+	uintptr			out;
+	int				ret;
+	uint32			n;
+	uint32 volatile	*t0mmio;
+	uint32			st;
+	uint32			tt, bytes;
+	uint32			cycle;
+	
+	t0mmio = (uint32*)0x13000200;
+	
+	st = 0xffffffff - t0mmio[REG_VALUE];
+	tt = 0;
+	bytes = 0;
+	cycle = 0;
+	
+	ks = (KSTATE*)KSTATEADDR;
 	
 	for (;;) {
-		ksleep(0xffff);
-		kserdbg_putc('$');
+		//kprintf("KMSGTHREAD WOKE\n");
+		
+		/* check ring buffers for all threads */
+		for (proc = ks->procs; proc; proc = proc->next) {
+			for (th = proc->threads; th; th = th->next) {
+				//kprintf("  checking process:thread [%x:%x].... ktx.rb:%x\n", proc, th, th->ktx.rb);
+				if (!th->ktx.rb) {
+					//kprintf("       NOT-INSTANCED\n");
+					/* ring buffer not instanced */
+					continue;
+				}
+				//kprintf("   INSTANCED\n");
+				/* check if ring buffer can be read */
+				//int rb_read_nbio(RBM volatile *rbm, void *p, uint32 *sz, uint32 *advance) {
+				//th->krx
+				//th->ktx
+				
+				ret = kvmm2_getphy(&ks->kservproc->vmm, (uintptr)th->ktx.rb, &out);
+				//kprintf("    rb->r:%x rb->w:%x\n", th->ktx.rb->r, th->ktx.rb->w);
+				
+				for (sz = sizeof(pkt); rb_read_nbio(&th->ktx, &pkt[0], &sz, 0); sz = sizeof(pkt)) {
+					//kprintf("got pkt sz:%x [0]:%x [1]:%x correct:%x\n", sz, pkt[0], pkt[1], rand(pkt[0]));
+					//for (x = 1; x < sz; ++x) {
+					//	if (pkt[x] != ((rand(pkt[x - 1] & 0x0f) & 0x0f) | 0x80)) {
+					//		kprintf("ERROR x:%x got:%x need:%x\n", x, pkt[x], (rand(pkt[x - 1] & 0x0f) & 0x0f) | 0x80);
+					//		for (;;);
+					//	}
+					//}
+					bytes += sz;
+					++cycle;
+					
+					if ((cycle & 0xfff) == 0x400) {
+						tt = 0xffffffff - t0mmio[REG_VALUE];
+						kprintf("bytes:%x\n", bytes / (tt / 3906));
+					}
+				}
+			
+				//st = (0xffffffff - t0mmio[REG_VALUE]);
+			}
+		}
+		//kprintf("DONE\n");
+		ksleep(ks->tpers * 5);
 	}
 }
 
@@ -843,7 +928,9 @@ void start() {
 	/* set stack */
 	th->sp = (uintptr)kmalloc(1024 * 2) + 1024 * 2 - 8;
 	th->r0 = (uint32)th;
-
+	ks->kservthread = th;
+	ks->kservproc = process;
+	
 	th = (KTHREAD*)kmalloc(sizeof(KTHREAD));
 	memset(th, 0, sizeof(KTHREAD));
 	ll_add((void**)&process->threads, th);
@@ -896,6 +983,12 @@ void start() {
 	t0mmio[REG_CTRL] = CTRL_ENABLE | CTRL_MODE_PERIODIC | CTRL_SIZE_32 | CTRL_DIV_NONE | CTRL_INT_ENABLE;
 	t0mmio[REG_INTCLR] = ~0;		/* make sure interrupt is clear (might not be mandatory) */
 	ks->tpers = 1000000;
+
+	t0mmio = (uint32*)0x13000200;
+	t0mmio[REG_LOAD] = ~0;
+	t0mmio[REG_BGLOAD] = ~0;
+	t0mmio[REG_CTRL] = CTRL_ENABLE | CTRL_MODE_PERIODIC | CTRL_SIZE_32 | CTRL_DIV_256;
+	t0mmio[REG_INTCLR] = ~0;		/* make sure interrupt is clear (might not be mandatory) */
 	
 	kserdbg_putc('K');
 	kserdbg_putc('\n');

@@ -52,7 +52,8 @@
 /* block size for 1K page stack */
 #define K1KPAGESTACKBSZ		1024
 /* max number of ticks for a task */
-#define KTASKTICKS 10000
+//#define KTASKTICKS 10000
+#define KTASKTICKS 100000
 /*
 	============================================
 */

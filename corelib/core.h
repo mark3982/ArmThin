@@ -10,8 +10,10 @@ extern RBM				__corelib_tx;
 int sleep(uint32 timeout);
 void yield();
 uint32 getTicksPerSecond();
+
 int rand();
 void srand(unsigned int seed);
+uint32 __rand(uint32 next);
 
 void printf(const char *fmt, ...);
 void sprintf(char *buf, const char *fmt, ...);

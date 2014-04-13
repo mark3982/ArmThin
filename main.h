@@ -93,6 +93,7 @@
 #define KSWI_SLEEP				101
 #define KSWI_YEILD				102
 #define KSWI_GETTICKPERSECOND	103
+#define KSWI_KERNELMSG			104
 	
 #define KTHREAD_SLEEPING		0x1
 #define KTHREAD_WAKEUP			0x2
@@ -103,8 +104,10 @@ typedef struct _KTHREAD {
 	struct _KTHREAD		*prev;
 
 	/* thread kernel communication */
-	RBM					krx;
-	RBM					ktx;
+	RBM					krx;			/* kernel server thread address */
+	RBM					ktx;			/* kernel server thread address */
+	RB					*urx;			/* thread space address */
+	RB					*utx;			/* thread space address */
 	
 	/* thread control */
 	uint64				timeout;			/* when to wakeup */
@@ -129,6 +132,10 @@ typedef struct _KSTATE {
 	KTHREAD			*cthread;
 	KTHREAD			*idleth;
 	KPROCESS		*idleproc;
+	
+	/* ring buffer (IPC) */
+	KPROCESS		*kservproc;
+	KTHREAD			*kservthread;
 	
 	/* physical and heap memory management */
 	KHEAPBM			hphy;			/* kernel physical page heap */

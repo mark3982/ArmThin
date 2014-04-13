@@ -339,7 +339,7 @@ int kvmm2_findregion(KVMMTABLE *vmm, uintptr tc, uintptr low, uintptr high, uint
 		high = (high & ~0xfff) + 0x1000;
 	}
 	
-	kprintf("low:%x high:%x\n", low, high);
+	//kprintf("low:%x high:%x\n", low, high);
 	
 	t = vmm->table;
 	c = 0;
@@ -431,7 +431,7 @@ int kvmm2_mapsingle(KVMMTABLE *vmm, uintptr v, uintptr p, uint32 flags) {
 	}
 	
 	if ((t[v >> 20] & 3) == 0) {
-		kprintf("using 1k table %x\n", st);
+		//kprintf("using 1k table %x\n", st);
 		/* update coarse table entries (ONLY for kernel space) */
 		if (ks->vmm.table == t) {
 			ks->vmm_ucte += 256;

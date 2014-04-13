@@ -7,10 +7,13 @@
 
 static unsigned long int next = 1;
  
-int rand()
-{
+uint32 __rand(uint32 next) {
     next = next * 1103515245 + 12345;
-    return (unsigned int)(next / 65536) % 32768;
+    return (uint32)(next / 65536) % 32768;
+}
+ 
+int rand() {
+	return (int)__rand(next);
 }
 
 void srand(unsigned int seed)
@@ -168,7 +171,7 @@ void yield() {
 	This will copy a message into a buffer and WILL block until a message has been read, or until
 	the timeout expires.
 */
-int rb_read_bio(RBM volatile *rbm, void *p, uint32 *sz, uint32 *advance, uint32 timeout) {
+int rb_read_bio(RBM *rbm, void *p, uint32 *sz, uint32 *advance, uint32 timeout) {
 	while (!rb_read_nbio(rbm, p, sz, advance)) {
 		/* if timeout expired then exit */
 		if (!sleep(timeout)) {
