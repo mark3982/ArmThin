@@ -467,6 +467,38 @@ void k_exphandler(uint32 lr, uint32 type) {
 				kvmm2_allocregion(&ks->cproc->vmm, r0, KMEMSIZE, 0, TLB_C_AP_PRIVACCESS, &((uint32*)KSTACKEXC)[-14]);
 				break;
 			case KSWI_VFREE:
+				/*
+					We have to be careful here because the memory can be shared by two or more processes,
+					which means we have to consult our reference table before actually handing the memory
+					back to the physical memory manager.
+					
+					This value is incremented in two places:
+						1. in the vmm's alloc function
+						2. when memory is shared
+						
+					Otherwise, unless manually incremented, it should be zero which means we do not
+					deallocate it because it was directly mapped.
+					
+					> 1 	shared (DO NOT FREE YET)							decrement it
+					== 1	only reference, allocated through vmm function		decrement it
+					0		mapped directly (not considered allocated)			nothing
+					
+				*/
+				r0 = ((uint32*)KSTACKEXC)[-14];
+				r1 = ((uint32*)KSTACKEXC)[-13];
+				for (x = 0; x < r1; ++x) {
+					/* unmap (dont free.. yet) */
+					kvmm2_getphy(&ks->cproc->vmm, r0 + r1 * 0x1000, &out);
+					kvmm2_unmap(&ks>cproc->vmm, r0 + r1 * 0x1000, 0);
+					if (kvmm2_revget(out, 1) == 1) {
+						/* no references left (decrement to zero) */
+						kvmm2_revdec(out);
+						k_heapBMFree(&ks->hphy, (void*)out);
+					} else {
+						/* decrement reference count */
+						kvmm2_revdec(out);
+					}
+				}
 				break;
 			case KSWI_WAKEUP:
 				/* wake up thread function */
