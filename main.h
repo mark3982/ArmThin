@@ -94,7 +94,9 @@
 #define KSWI_YEILD				102
 #define KSWI_GETTICKPERSECOND	103
 #define KSWI_KERNELMSG			104
-	
+#define KSWI_VALLOC				105
+#define KSWI_VFREE				106
+
 #define KTHREAD_SLEEPING		0x1
 #define KTHREAD_WAKEUP			0x2
 #define KTHREAD_KIDLE			0x4

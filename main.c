@@ -461,6 +461,13 @@ void k_exphandler(uint32 lr, uint32 type) {
 		//((uint32*)KSTACKEXC)[-13] = R1;
 		
 		switch (swi) {
+			case KSWI_VALLOC:
+				/* allocate range of pages and store result in R0 */
+				r0 = ((uint32*)KSTACKEXC)[-14];
+				kvmm2_allocregion(&ks->cproc->vmm, r0, KMEMSIZE, 0, TLB_C_AP_PRIVACCESS, &((uint32*)KSTACKEXC)[-14]);
+				break;
+			case KSWI_VFREE:
+				break;
 			case KSWI_WAKEUP:
 				/* wake up thread function */
 				r0 = ((uint32*)KSTACKEXC)[-14];
@@ -601,6 +608,17 @@ void memset(void *p, uint8 v, uintptr sz) {
 	}
 }
 
+/*
+	This frees any resources associated with a process. Mainly,
+	the memory mapped into it's address space at the moment.
+*/
+int kprocfree(KPROCESS *proc) {
+	/* walk page directory */
+		/* is kvmm2_revget(..) set to 1? */
+			/* yes then free it */
+			/* no, then decrement it (0 becomes 0) */
+}
+
 int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	ELF32_EHDR			*ehdr;
 	ELF32_SHDR			*shdr;
@@ -639,7 +657,9 @@ int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	th->cpsr = 0x60000000 | ARM4_MODE_USER;
 	/* set stack */
 	th->sp = 0x90000800;
-	/* map serial output mmio */
+	/* map timers for debugging */
+	kvmm2_mapsingle(&proc->vmm, 0xb0000000, 0x13000000, TLB_C_AP_FULLACCESS);
+	/* map serial output for debuggin */
 	kvmm2_mapsingle(&proc->vmm, 0xa0000000, 0x16000000, TLB_C_AP_FULLACCESS);
 	/* map stack page (4K) */
 	kvmm2_allocregionat(&proc->vmm, 1, 0x90000000, TLB_C_AP_FULLACCESS);
@@ -731,7 +751,7 @@ void kthread(KTHREAD *myth) {
 	KPROCESS		*proc;
 	KTHREAD			*th;
 	KSTATE			*ks;
-	uint8			pkt[128];
+	uint32			pkt[32];
 	uint32			sz;
 	uintptr			out;
 	int				ret;
@@ -751,47 +771,51 @@ void kthread(KTHREAD *myth) {
 	ks = (KSTATE*)KSTATEADDR;
 	
 	for (;;) {
-		//kprintf("KMSGTHREAD WOKE\n");
-		
 		/* check ring buffers for all threads */
 		for (proc = ks->procs; proc; proc = proc->next) {
 			for (th = proc->threads; th; th = th->next) {
-				//kprintf("  checking process:thread [%x:%x].... ktx.rb:%x\n", proc, th, th->ktx.rb);
 				if (!th->ktx.rb) {
-					//kprintf("       NOT-INSTANCED\n");
 					/* ring buffer not instanced */
 					continue;
 				}
-				//kprintf("   INSTANCED\n");
-				/* check if ring buffer can be read */
-				//int rb_read_nbio(RBM volatile *rbm, void *p, uint32 *sz, uint32 *advance) {
-				//th->krx
-				//th->ktx
-				
-				ret = kvmm2_getphy(&ks->kservproc->vmm, (uintptr)th->ktx.rb, &out);
-				//kprintf("    rb->r:%x rb->w:%x\n", th->ktx.rb->r, th->ktx.rb->w);
 				
 				for (sz = sizeof(pkt); rb_read_nbio(&th->ktx, &pkt[0], &sz, 0); sz = sizeof(pkt)) {
-					//kprintf("got pkt sz:%x [0]:%x [1]:%x correct:%x\n", sz, pkt[0], pkt[1], rand(pkt[0]));
-					//for (x = 1; x < sz; ++x) {
-					//	if (pkt[x] != ((rand(pkt[x - 1] & 0x0f) & 0x0f) | 0x80)) {
-					//		kprintf("ERROR x:%x got:%x need:%x\n", x, pkt[x], (rand(pkt[x - 1] & 0x0f) & 0x0f) | 0x80);
-					//		for (;;);
-					//	}
-					//}
-					bytes += sz;
-					++cycle;
-					
-					if ((cycle & 0xfff) == 0x400) {
-						tt = 0xffffffff - t0mmio[REG_VALUE];
-						kprintf("bytes:%x\n", bytes / (tt / 3906));
+					/* check packet type */
+					switch (pkt[0] & 0xff) {
+						case 0:
+							/* send message to another process:thread */
+							break;
+						case 1:
+							/* register service */
+							break;
+						case 2:
+							/* enumerate services */
+							break;
+						case 3:
+							/* request shared memory from another process:thread */
+							/* check for existing request (only one at a time!) */
+							/* add request entry */
+							/* send message to target process:thread */
+							break;
+						case 4:
+							/* accept shared memory request from another process */
+							/* grab process:thread list modify lock (can be read but not modified) */
+								/* find request entry */
+									/* map memory to process that is accepting request */
+									/* increment ref count on physical pages */
+							/* grab vmm lock on both processes (vmm for processes can not be modified) */
+							/* release vmm lock and release process:thread list modify lock */
+							break;
+						case 5:
+							/* terminate (this thread) or any other thread */
+							break;
+						case 6:
+							/* terminate (this process) or any other process */
+							break;
 					}
 				}
-			
-				//st = (0xffffffff - t0mmio[REG_VALUE]);
 			}
 		}
-		//kprintf("DONE\n");
 		ksleep(ks->tpers * 5);
 	}
 }
@@ -987,7 +1011,7 @@ void start() {
 	t0mmio = (uint32*)0x13000200;
 	t0mmio[REG_LOAD] = ~0;
 	t0mmio[REG_BGLOAD] = ~0;
-	t0mmio[REG_CTRL] = CTRL_ENABLE | CTRL_MODE_PERIODIC | CTRL_SIZE_32 | CTRL_DIV_256;
+	t0mmio[REG_CTRL] = CTRL_ENABLE | CTRL_MODE_PERIODIC | CTRL_SIZE_32 | CTRL_DIV_16;
 	t0mmio[REG_INTCLR] = ~0;		/* make sure interrupt is clear (might not be mandatory) */
 	
 	kserdbg_putc('K');

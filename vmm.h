@@ -64,6 +64,13 @@ int kvmm2_getu4k(KVMMTABLE *vmm, uintptr *o, uint32 flags);
 uintptr kvmm2_revget(uintptr p, uint8 opt);
 int kvmm2_revset(uintptr p, uint32 v, uint8 opt);
 uintptr kvmm2_rndup(uintptr sz);
+/*
+	These are used for tracking reference counts on physical memory pages. 
+	This allows me to share memory and hand it back to the physical page
+	manager when it is no longer referenced.
+*/
+uint32 kvmm2_revdec(uintptr v);
+uint32 kvmm2_revinc(uintptr v);
 
 int kstack_init(KSTACK *stack, uintptr lowaddr);
 int kstack_push(KSTACK *stack, uint32 v);

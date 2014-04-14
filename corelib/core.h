@@ -1,6 +1,6 @@
 #ifndef CORELIB_CORE_H
 #define CORELIB_CORE_H
-#include "../stdtypes.h"
+#include "stdtypes.h"
 #include "rb.h"
 
 extern RBM				__corelib_rx;

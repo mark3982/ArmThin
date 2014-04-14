@@ -97,6 +97,25 @@ uintptr kvmm2_rndup(uintptr sz) {
 	return (sz / 4096) * 4096 != sz ? (sz / 4096) + 1 : sz / 4096;
 }
 
+uint32 kvmm2_revinc(uintptr v) {
+	uint32		val;
+	val = kvmm2_revget(v, 1) + 1;
+	kvmm2_revset(v, val, 1);
+	return val;
+}
+
+uint32 kvmm2_revdec(uintptr v) {
+	uint32		val;
+	val = kvmm2_revget(v, 1);
+	if (val == 0) {
+		return val;
+	}
+	--val;
+	kvmm2_revset(v, val, 1);
+	return val;
+}
+
+
 int kvmm2_revset(uintptr p, uint32 v, uint8 opt) {
 	KSTATE			*ks;
 	uint32			*t;
@@ -392,6 +411,8 @@ int kvmm2_allocregion(KVMMTABLE *vmm, uintptr pcnt, uintptr low, uintptr high, u
 	
 	for (x = 0; x < pcnt; ++x) {
 		p = (uintptr)k_heapBMAllocBound(&ks->hphy, 0x1000, 12);
+		/* increment reference count */
+		kvmm2_revinc(p);
 		if (!p) {
 			PANIC("heap-alloc-failed");
 			return 0;
