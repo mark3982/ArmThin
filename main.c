@@ -12,6 +12,7 @@
 #include "kheap.h"
 #include "vmm.h"
 #include "kmod.h"
+#include "atomic.h"
 
 extern uint8 _BOI;
 extern uint8 _EOI;
@@ -32,6 +33,14 @@ void __attribute__((naked)) entry()
 	asm("str r2, [r1]");
 	/* call main kernel function */
 	asm("bl	start");
+}
+
+void test() {
+	uint32			m;
+	uint32			n;
+	
+	m = 0xbb;
+	n = katomic_exchange(&m, 0xaa);
 }
 
 /* small chunk memory alloc/free */
@@ -123,7 +132,6 @@ void arm4_tlbset1(uint32 base) {
 uint32 arm4_tlbget1() {
 	uint32			base;
 	asm("mrc p15, 0, %[tlb], c2, c0, 1" : [tlb]"=r" (base));
-	
 	return base;
 }
 
@@ -229,76 +237,56 @@ void ksched() {
 	
 	ks = (KSTATE*)KSTATEADDR;
 
-	/* if valid process and thread then store */
-	if (ks->cproc && ks->cthread) {
-		/*
-			1. store register on stack in thread struct
-			2. access hidden registers and store in thread struct
-		*/
-		kt = ks->cthread;
-		kt->pc = ((uint32*)KSTACKEXC)[-1];
-		kt->r12 = ((uint32*)KSTACKEXC)[-2];
-		kt->r11 = ((uint32*)KSTACKEXC)[-3];
-		kt->r10 = ((uint32*)KSTACKEXC)[-4];
-		kt->r9 = ((uint32*)KSTACKEXC)[-5];
-		kt->r8 = ((uint32*)KSTACKEXC)[-6];
-		kt->r7 = ((uint32*)KSTACKEXC)[-7];
-		kt->r6 = ((uint32*)KSTACKEXC)[-8];
-		kt->r5 = ((uint32*)KSTACKEXC)[-9];
-		kt->r4 = ((uint32*)KSTACKEXC)[-10];
-		kt->r3 = ((uint32*)KSTACKEXC)[-11];
-		kt->r2 = ((uint32*)KSTACKEXC)[-12];
-		kt->r1 = ((uint32*)KSTACKEXC)[-13];
-		kt->r0 = ((uint32*)KSTACKEXC)[-14];
-		kt->cpsr = ((uint32*)KSTACKEXC)[-15];
-		/* switch to system mode get hidden registers then switch back */
-		asm("mrs r0, cpsr \n\
-			 mov r1, r0 \n\
-			 bic r0, r0, #0x1f \n\
-			 orr r0, r0, #0x1f \n\
-			 msr cpsr, r0 \n\
-			 mov %[sp], sp \n\
-			 mov %[lr], lr \n\
-			 msr cpsr, r1 \n\
-			 " : [sp]"=r" (__sp), [lr]"=r" (__lr));
-		kt->sp = __sp;
-		kt->lr = __lr;
-	}
-
-	if (!ks->cproc) {
-		/* initial start */
-		ks->cproc = ks->procs;
-		ks->cthread = ks->procs->threads;
-	}
+	/*
+		1. store register on stack in thread struct
+		2. access hidden registers and store in thread struct
+	*/
+	kt = ks->cthread;
+	kt->pc = ((uint32*)KSTACKEXC)[-1];
+	kt->r12 = ((uint32*)KSTACKEXC)[-2];
+	kt->r11 = ((uint32*)KSTACKEXC)[-3];
+	kt->r10 = ((uint32*)KSTACKEXC)[-4];
+	kt->r9 = ((uint32*)KSTACKEXC)[-5];
+	kt->r8 = ((uint32*)KSTACKEXC)[-6];
+	kt->r7 = ((uint32*)KSTACKEXC)[-7];
+	kt->r6 = ((uint32*)KSTACKEXC)[-8];
+	kt->r5 = ((uint32*)KSTACKEXC)[-9];
+	kt->r4 = ((uint32*)KSTACKEXC)[-10];
+	kt->r3 = ((uint32*)KSTACKEXC)[-11];
+	kt->r2 = ((uint32*)KSTACKEXC)[-12];
+	kt->r1 = ((uint32*)KSTACKEXC)[-13];
+	kt->r0 = ((uint32*)KSTACKEXC)[-14];
+	kt->cpsr = ((uint32*)KSTACKEXC)[-15];
+	/* switch to system mode get hidden registers then switch back */
+	asm("mrs r0, cpsr \n\
+		 mov r1, r0 \n\
+		 bic r0, r0, #0x1f \n\
+		 orr r0, r0, #0x1f \n\
+		 msr cpsr, r0 \n\
+		 mov %[sp], sp \n\
+		 mov %[lr], lr \n\
+		 msr cpsr, r1 \n\
+		 " : [sp]"=r" (__sp), [lr]"=r" (__lr));
+	kt->sp = __sp;
+	kt->lr = __lr;
 	
 	while (1) {
-		if (ks->cthread) {
+		/* get next thread */
+		{
 			/* get next thread */
-			ks->cthread = ks->cthread->next;
-		}
-		
-		/* if none get next process */
-		if (!ks->cthread) {
-			/* get next process */
-			if (ks->cproc) {
-				ks->cproc = ks->cproc->next;
-			}
-			/* if none get first process */
-			if (!ks->cproc) {
-				ks->cproc = ks->procs;
-			}
-			/* get first thread */
-			if (ks->cproc) {
-				ks->cthread = ks->cproc->threads;
+			if (ks->cthread && ks->cthread->next) {
+				ks->cthread = ks->cthread->next;
 			} else {
-				ks->cthread = 0;
+				if (ks->cproc->next) {
+					ks->cproc = ks->cproc->next;
+				} else {
+					ks->cproc = ks->procs;
+				}
+				ks->cthread = ks->cproc->threads;
 			}
-		}
-		
-		if (!ks->cthread) {
-			break;
-		}
-		
+			/* keep going until we have a valid thread */
+		} while (!ks->cthread);
+			
 		/* if current thread is sleeping and current thread equals last thread */
 		if ((ks->cthread->flags & KTHREAD_SLEEPING) && (ks->cthread == kt)) {
 			PANIC("all-threads-sleeping");
@@ -401,9 +389,46 @@ void ksched() {
 	}
 }
 
+static void kprocfree__walkercb(uintptr v, uintptr p) {
+	KSTATE					*ks;
+	uint32					r0;
+	
+	ks = (KSTATE*)KSTATEADDR;
+
+	/* just unmap it to zero the entry for safety */
+	kvmm2_unmap(&ks->cproc->vmm, v, 0);
+	/* figure out if it is alloc'ed or shared */
+	r0 = kvmm2_revget(p, 1);
+	switch (r0) {
+		case 1:
+			/* no references left (decrement to zero) */
+			kprintf("    no references (but alloced) %x:%x\n", v, p);
+			kvmm2_revdec(p);
+			k_heapBMFree(&ks->hphy, (void*)p);
+			break;
+		case 0:
+			/* do nothing (only mapped not alloced) */
+			break;
+		default:
+			kprintf("     decrement ref cnt for %x:%x\n", v, p);
+			/* decrement reference count */
+			kvmm2_revdec(p);
+			break;
+	}
+}
+
+int kprocfree(KPROCESS *proc) {
+	kprintf("kprocfree...\n");
+	/* walk entries and free them */
+	kvmm2_walkentries(&proc->vmm, &kprocfree__walkercb);
+	
+	return 1;
+}
+
+
 void k_exphandler(uint32 lr, uint32 type) {
 	uint32			*t0mmio;
-	uint32			*picmmio;
+	uint8			*picmmio;
 	uint32			swi;
 	KSTATE			*ks;
 	int				x;
@@ -411,7 +436,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 	uintptr			out;
 	uint32			r0, r1;
 	KPROCESS		*proc;
-	KTHREAD			*th;
+	KTHREAD			*th, *_th;
 	
 	ks = (KSTATE*)KSTATEADDR;
 		
@@ -426,8 +451,8 @@ void k_exphandler(uint32 lr, uint32 type) {
 	*/
 	
 	if (type == ARM4_XRQ_IRQ) {
-		picmmio = (uint32*)0x14000000;
-		
+		picmmio = (uint8*)0x1f001000;
+	
 		//kprintf("picmmio[PIC_IRQ_STATUS]:%x\n", picmmio[PIC_IRQ_STATUS]);
 		/*
 			It is possible that other pins are activated so we just check
@@ -435,11 +460,22 @@ void k_exphandler(uint32 lr, uint32 type) {
 			
 			1 << 4
 		*/
-		if (picmmio[PIC_IRQ_STATUS] & (1<<6)) {
-			t0mmio = (uint32*)0x13000100;
+		//if (picmmio[PIC_IRQ_STATUS] & (1<<6)) {
+		//for (x = 0; x < 10; ++x) {
+		//	kprintf("PIC-CHECK:%x\n", picmmio[0x200 + x]);
+		//}
+		//for (;;);
+		if (picmmio[0x200 + (36 >> 3)] & (1 << (36 & 7))) {
+			/* lower timer IRQ line */
+			t0mmio = (uint32*)0x10011000;
 			t0mmio[REG_INTCLR] = 1;			/* according to the docs u can write any value */
 			
+			/* clear pending interrupt with PIC */
+			picmmio[0x280 + (36 >> 3)] = 1 << (36 & 7);
+			
 			//kprintf("t0mmio[REG_BGLOAD]:%x ks->ctime:%x\n", t0mmio[REG_BGLOAD], ks->ctime);
+			
+			/* update current time */
 			ks->ctime += t0mmio[REG_BGLOAD];
 			
 			ksched();
@@ -461,10 +497,45 @@ void k_exphandler(uint32 lr, uint32 type) {
 		//((uint32*)KSTACKEXC)[-13] = R1;
 		
 		switch (swi) {
+			case KSWI_TERMPROCESS:
+				/* unlink process and threads, but keep modify pointer so
+				   scheduler can grab next thread */
+				proc = ks->cproc;
+				th = ks->cthread;
+				_th = th->next;
+				th->next = 0;
+				/* should schedule a thread from the next process */
+				ksched();
+				/* restore pointer */
+				th->next = _th;
+				/* cycle through threads releasing resources */
+				for (th = proc->threads; th; th = _th) {
+					_th = th->next;
+					/* release heap memory */
+					kfree(th);
+				}
+				/* free process resources */
+				if (!kprocfree(proc)) {
+					PANIC("ERROR-FREEING-PROC-RESOURCES");
+				}
+				/* release heap memory */
+				kfree(proc);
+				break;
+			case KSWI_TERMTHREAD:
+				proc = ks->cproc;
+				th = ks->cthread;
+				/* should schedule a thread from the next process */
+				ksched();
+				/* now unlink and free thread resources */
+				ll_rem((void**)&proc->threads, th);
+				kfree(th);
+				break;
 			case KSWI_VALLOC:
 				/* allocate range of pages and store result in R0 */
 				r0 = ((uint32*)KSTACKEXC)[-14];
+				kprintf("KSWI_VALLOC r0:%x\n", r0);
 				kvmm2_allocregion(&ks->cproc->vmm, r0, KMEMSIZE, 0, TLB_C_AP_PRIVACCESS, &((uint32*)KSTACKEXC)[-14]);
+				kprintf("            r0:%x\n", r0);
 				break;
 			case KSWI_VFREE:
 				/*
@@ -486,17 +557,27 @@ void k_exphandler(uint32 lr, uint32 type) {
 				*/
 				r0 = ((uint32*)KSTACKEXC)[-14];
 				r1 = ((uint32*)KSTACKEXC)[-13];
+				kprintf("KSWI_VFREE r0:%x r1:%x\n", r0, r1);
 				for (x = 0; x < r1; ++x) {
 					/* unmap (dont free.. yet) */
-					kvmm2_getphy(&ks->cproc->vmm, r0 + r1 * 0x1000, &out);
-					kvmm2_unmap(&ks>cproc->vmm, r0 + r1 * 0x1000, 0);
-					if (kvmm2_revget(out, 1) == 1) {
-						/* no references left (decrement to zero) */
-						kvmm2_revdec(out);
-						k_heapBMFree(&ks->hphy, (void*)out);
-					} else {
-						/* decrement reference count */
-						kvmm2_revdec(out);
+					kvmm2_getphy(&ks->cproc->vmm, r0 + x * 0x1000, &out);
+					kvmm2_unmap(&ks->cproc->vmm, r0 + x * 0x1000, 0);
+					r0 = kvmm2_revget(out, 1);
+					switch (r0) {
+						case 1:
+							/* no references left (decrement to zero) */
+							kprintf("    no references (but alloced) %x\n", r0 + x * 0x1000);
+							kvmm2_revdec(out);
+							k_heapBMFree(&ks->hphy, (void*)out);
+							break;
+						case 0:
+							/* do nothing (only mapped not alloced) */
+							break;
+						default:
+							kprintf("     decrement ref cnt for %x\n", r0 + x * 0x1000);
+							/* decrement reference count */
+							kvmm2_revdec(out);
+							break;
 					}
 				}
 				break;
@@ -640,17 +721,6 @@ void memset(void *p, uint8 v, uintptr sz) {
 	}
 }
 
-/*
-	This frees any resources associated with a process. Mainly,
-	the memory mapped into it's address space at the moment.
-*/
-int kprocfree(KPROCESS *proc) {
-	/* walk page directory */
-		/* is kvmm2_revget(..) set to 1? */
-			/* yes then free it */
-			/* no, then decrement it (0 becomes 0) */
-}
-
 int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	ELF32_EHDR			*ehdr;
 	ELF32_SHDR			*shdr;
@@ -690,9 +760,17 @@ int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	/* set stack */
 	th->sp = 0x90000800;
 	/* map timers for debugging */
-	kvmm2_mapsingle(&proc->vmm, 0xb0000000, 0x13000000, TLB_C_AP_FULLACCESS);
-	/* map serial output for debuggin */
-	kvmm2_mapsingle(&proc->vmm, 0xa0000000, 0x16000000, TLB_C_AP_FULLACCESS);
+	/*
+		integrator-cp	0x13000000
+		realview		0x10011000
+	*/
+	kvmm2_mapsingle(&proc->vmm, 0xb0000000, 0x10011000, TLB_C_AP_FULLACCESS);
+	/* map serial output for debugging */
+	/* 
+		integrator-cp 	0x16000000
+		realview		0x10009000
+	*/
+	kvmm2_mapsingle(&proc->vmm, 0xa0000000, 0x10009000, TLB_C_AP_FULLACCESS);
 	/* map stack page (4K) */
 	kvmm2_allocregionat(&proc->vmm, 1, 0x90000000, TLB_C_AP_FULLACCESS);
 	
@@ -793,7 +871,7 @@ void kthread(KTHREAD *myth) {
 	uint32			tt, bytes;
 	uint32			cycle;
 	
-	t0mmio = (uint32*)0x13000200;
+	t0mmio = (uint32*)0x10011000;
 	
 	st = 0xffffffff - t0mmio[REG_VALUE];
 	tt = 0;
@@ -861,6 +939,7 @@ void kidle() {
 void start() {
 	uint32		*t0mmio;
 	uint32		*picmmio;
+	uint8		*a9picmmio;
 	KSTATE		*ks;
 	int			x;
 	uint32		lock;
@@ -940,20 +1019,50 @@ void start() {
 	kvmm2_mapmulti(&ks->vmm, 0, 0, kvmm2_rndup(KRAMADDR), TLB_C_AP_PRIVACCESS | KVMM_DIRECT | KVMM_SKIP);
 
 	/* map serial out register, PIC, and timer */
-	kvmm2_mapsingle(&ks->vmm, 0x16000000, 0x16000000, TLB_C_AP_PRIVACCESS | KVMM_DIRECT);
-	kvmm2_mapsingle(&ks->vmm, 0x14000000, 0x14000000, TLB_C_AP_PRIVACCESS | KVMM_DIRECT);
-	kvmm2_mapsingle(&ks->vmm, 0x13000000, 0x13000000, TLB_C_AP_PRIVACCESS | KVMM_DIRECT);
+	kvmm2_mapsingle(&ks->vmm, 0x10011000, 0x10011000, TLB_C_AP_PRIVACCESS | KVMM_DIRECT);
+	kvmm2_mapsingle(&ks->vmm, 0x10009000, 0x10009000, TLB_C_AP_PRIVACCESS | KVMM_DIRECT);
+	kvmm2_mapsingle(&ks->vmm, 0x1f001000, 0x1f001000, TLB_C_AP_PRIVACCESS | KVMM_DIRECT);
+	
+	a9picmmio = (uint8*)0x1f000100;
+	
+	/* enable PIC for CPU 0 */
+	a9picmmio[0] = 1;
+	/* set priority mask for CPU 0 */
+	a9picmmio[4] = 0xff;
+	
+	a9picmmio = (uint8*)0x1f001000;
+	// pic[4]
+	
+	/* enable PIC */
+	a9picmmio[0] = 1;
+	
+	a9picmmio[0x100 + (36 >> 3)] = (1 << (36 & 7));
+	
+	/* set enable */
+	//for (x = 0x100; x < 0x180; ++x) {
+	//	a9picmmio[x] = 0xff;
+	//}
+
+	/* clear pending interrupt */
+	//for (x = 0x280; x < 0x300; ++x) {
+	//	a9picmmio[x] = 0xff;
+	//}
 	
 	kserdbg_putc('U');
-
+	
 	arm4_tlbsetmode(KMEMINDEX);
 	/* load location of TLB */
 	arm4_tlbset1((uintptr)ks->vmm.table);	/* user space */
 	arm4_tlbset0((uintptr)ks->vmm.table);	/* kernel space */
 	/* set that all domains are checked against the TLB entry access permissions */
 	arm4_tlbsetdom(0x55555555);
+	
+	kserdbg_putc('F');
 	/* enable TLB 0x1 and disable subpages 0x800000 */
-	arm4_tlbsetctrl(arm4_tlbgetctrl() | 0x1 | (1 << 23));
+	//arm4_tlbsetctrl(arm4_tlbgetctrl() | 0x1 | (1 << 23));
+	kprintf("\ntblctrl:%x\n", arm4_tlbgetctrl());
+	arm4_tlbsetctrl(arm4_tlbgetctrl() | 0x1);
+	kprintf("tblctrl:%x\n", arm4_tlbgetctrl());
 	
 	/* testing something GCC specific (built-in atomic locking) */
 	//while (__sync_val_compare_and_swap(&lock, 0, 1));
@@ -999,6 +1108,10 @@ void start() {
 	ks->idleth = th;
 	ks->idleproc = process;
 	
+	/* just to get things started */
+	ks->cproc = process;
+	ks->cthread = th;
+	
 	#define KMODTYPE_ELFUSER			1
 	/*
 		create a task for any attached modules of the correct type
@@ -1017,7 +1130,7 @@ void start() {
 	}
 	
 	/* enable IRQ */
-	arm4_cpsrset(arm4_cpsrget() & ~(1 << 7));
+	arm4_cpsrset(arm4_cpsrget() & ~((1 << 7) | (1 << 6)));
 	
 	/* initialize timer and PIC 
 	
@@ -1027,20 +1140,20 @@ void start() {
 		IRQ register. If you enable both IRQ and FIQ then FIQ will
 		take priority and be used.
 	*/
-	picmmio = (uint32*)0x14000000;
-	picmmio[PIC_IRQ_ENABLESET] = (1<<5) | (1<<6) | (1<<7);
+	//picmmio = (uint32*)0x14000000;
+	//picmmio[PIC_IRQ_ENABLESET] = (1<<5) | (1<<6) | (1<<7);
 	
 	/*
 		See datasheet for timer initialization details.
 	*/
-	t0mmio = (uint32*)0x13000100;
+	t0mmio = (uint32*)0x10011000;
 	t0mmio[REG_LOAD] = KTASKTICKS;
 	t0mmio[REG_BGLOAD] = KTASKTICKS;			
 	t0mmio[REG_CTRL] = CTRL_ENABLE | CTRL_MODE_PERIODIC | CTRL_SIZE_32 | CTRL_DIV_NONE | CTRL_INT_ENABLE;
 	t0mmio[REG_INTCLR] = ~0;		/* make sure interrupt is clear (might not be mandatory) */
 	ks->tpers = 1000000;
 
-	t0mmio = (uint32*)0x13000200;
+	t0mmio = (uint32*)0x10011200;
 	t0mmio[REG_LOAD] = ~0;
 	t0mmio[REG_BGLOAD] = ~0;
 	t0mmio[REG_CTRL] = CTRL_ENABLE | CTRL_MODE_PERIODIC | CTRL_SIZE_32 | CTRL_DIV_16;

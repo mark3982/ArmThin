@@ -513,6 +513,42 @@ int kvmm2_mapsingle(KVMMTABLE *vmm, uintptr v, uintptr p, uint32 flags) {
 	return 1;
 }
 
+int kvmm2_walkentries(KVMMTABLE *vmm, KVMM2_WALKCB cb) {
+	uint32			*t;
+	uint32			*st;
+	uint32			x, y;
+	uint32			c;
+	
+	t = vmm->table;
+	
+	for (c = 0, x = 0; x < 1024; ++x) {
+		/* do not support anything other than coarse table */
+		if ((t[x] & 0x3) > TLB_COARSE) {
+			/* throw PANIC so we can catch this problem and solve it */
+			PANIC("ONLY-COARSE-TABLE-SUPPORTED");
+		}
+		
+		if ((t[x] & 0x3) == TLB_COARSE) {
+			/* walk sub-table */
+			st = (uint32*)(t[x] & ~0x3ff);
+			/* free 1k page used by sub-table */
+			for (y = 0; y < 256; ++y) {
+				if ((st[y] & 3) != TLB_C_SMALLPAGE || (st[y] & 3) != 0) {
+					PANIC("ONLY-4K-AND-ABSENT-SUPPORTED");
+				}
+				
+				if ((st[y] & 3) == TLB_C_SMALLPAGE) {
+					/* callback with page */
+					cb((x << 20) | (y << 12), st[y] & ~0xfff);
+					++c;
+				}
+			}
+		}
+	}
+	
+	return c;
+}
+
 int kvmm2_unmap(KVMMTABLE *vmm, uintptr v, uint8 free) {
 	uintptr			phy;
 	uint32			*t, *st;

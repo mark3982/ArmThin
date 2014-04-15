@@ -167,6 +167,23 @@ void yield() {
 	asm("swi #102");
 }
 
+uintptr valloc(uintptr cnt) {
+	uintptr			result;
+
+	asm("	mov r0, %[in] \n\
+			swi #105 \n\
+			mov %[result], r0 \n\
+		" : [result]"=r" (result) : [in]"r" (cnt));
+	return result;
+}
+
+void vfree(uintptr addr, uintptr cnt) {
+	asm("	mov r0, %[i1] \n\
+			mov r1, %[i2] \n\
+			swi #106 \n\
+		" : : [i1]"r" (addr), [i2]"r" (cnt));
+}
+
 /*
 	This will copy a message into a buffer and WILL block until a message has been read, or until
 	the timeout expires.

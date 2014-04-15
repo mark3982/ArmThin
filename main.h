@@ -96,6 +96,8 @@
 #define KSWI_KERNELMSG			104
 #define KSWI_VALLOC				105
 #define KSWI_VFREE				106
+#define KSWI_TERMPROCESS		107
+#define KSWI_TERMTHREAD			108
 
 #define KTHREAD_SLEEPING		0x1
 #define KTHREAD_WAKEUP			0x2

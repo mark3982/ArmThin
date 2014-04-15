@@ -11,6 +11,9 @@ int sleep(uint32 timeout);
 void yield();
 uint32 getTicksPerSecond();
 
+void vfree(uintptr addr, uintptr cnt);
+uintptr valloc(uintptr cnt);
+
 int rand();
 void srand(unsigned int seed);
 uint32 __rand(uint32 next);

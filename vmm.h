@@ -78,5 +78,8 @@ int kstack_pop(KSTACK *stack, uint32 *v);
 int kstack_empty(KSTACK *stack);
 int kstack_initblock(KSTACKBLOCK *b);
 
+typedef void (*KVMM2_WALKCB)(uintptr v, uintptr p);
+int kvmm2_walkentries(KVMMTABLE *vmm, KVMM2_WALKCB cb);
+
 void ptwalker(uint32 *t);
 #endif

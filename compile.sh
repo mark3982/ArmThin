@@ -12,13 +12,15 @@ cd fs
 
 cd ../../
 
-arm-eabi-gcc -s -I../inc -nostdlib -nostartfiles -ffreestanding -std=gnu99 -c *.c
-arm-eabi-gcc -s -I../inc -nostdlib -nostartfiles -ffreestanding -std=gnu99 -c kheap_bm.c
-arm-eabi-gcc -s -I../inc -nostdlib -nostartfiles -ffreestanding -std=gnu99 -c vmm.c
-arm-eabi-gcc -s -I../inc -nostdlib -nostartfiles -ffreestanding -std=gnu99 -c dbgout.c
-arm-eabi-gcc -s -I../inc -nostdlib -nostartfiles -ffreestanding -std=gnu99 -c kmod.c
-arm-eabi-gcc -s -I../inc -nostdlib -nostartfiles -ffreestanding -std=gnu99 -c ./corelib/rb.c -DKERNEL
-arm-eabi-ld -T link.ld -o __armos.bin main.o kheap_bm.o vmm.o dbgout.o kmod.o rb.o $LIBGCC
+export CCOPTS=-mcpu=cortex-a9
+
+arm-eabi-gcc $CCOPTS -s -I../inc -nostdlib -nostartfiles -ffreestanding -std=gnu99 -c *.c
+arm-eabi-gcc $CCOPTS -s -I../inc -nostdlib -nostartfiles -ffreestanding -std=gnu99 -c kheap_bm.c
+arm-eabi-gcc $CCOPTS -s -I../inc -nostdlib -nostartfiles -ffreestanding -std=gnu99 -c vmm.c
+arm-eabi-gcc $CCOPTS -s -I../inc -nostdlib -nostartfiles -ffreestanding -std=gnu99 -c dbgout.c
+arm-eabi-gcc $CCOPTS -s -I../inc -nostdlib -nostartfiles -ffreestanding -std=gnu99 -c kmod.c
+arm-eabi-gcc $CCOPTS -s -I../inc -nostdlib -nostartfiles -ffreestanding -std=gnu99 -c ./corelib/rb.c -DKERNEL
+arm-eabi-ld -T link.ld -o __armos.bin main.o atomic.o kheap_bm.o vmm.o dbgout.o kmod.o rb.o $LIBGCC
 echo doing object copy..
 arm-eabi-objcopy -j .text -O binary __armos.bin armos.bin
 ./attachmod.py ./modules/fs/fs ./armos.bin 1
