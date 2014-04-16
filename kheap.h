@@ -1,6 +1,6 @@
 #ifndef ARMOS_KH_KHEAP
 #define ARMOS_KH_KHEAP
-#include "kstdtypes.h"
+#include "stdtypes.h"
 
 //#define K_HEAP_TYPE_LINKEDCHUNKSANDBLOCKS
 #ifdef K_HEAP_TYPE_LINKEDCHUNKSANDBLOCKS

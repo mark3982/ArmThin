@@ -1017,37 +1017,17 @@ void start() {
 	/* map reverse table (ALREADY MAPPED WITH HCHK BELOW) */
 	/* map interrupt table, and chunk heap (hchk) */
 	kvmm2_mapmulti(&ks->vmm, 0, 0, kvmm2_rndup(KRAMADDR), TLB_C_AP_PRIVACCESS | KVMM_DIRECT | KVMM_SKIP);
-
-	/* map serial out register, PIC, and timer */
-	kvmm2_mapsingle(&ks->vmm, 0x10011000, 0x10011000, TLB_C_AP_PRIVACCESS | KVMM_DIRECT);
-	kvmm2_mapsingle(&ks->vmm, 0x10009000, 0x10009000, TLB_C_AP_PRIVACCESS | KVMM_DIRECT);
-	kvmm2_mapsingle(&ks->vmm, 0x1f001000, 0x1f001000, TLB_C_AP_PRIVACCESS | KVMM_DIRECT);
 	
-	a9picmmio = (uint8*)0x1f000100;
-	
+	//a9picmmio = (uint8*)0x1f000100;
 	/* enable PIC for CPU 0 */
-	a9picmmio[0] = 1;
+	//a9picmmio[0] = 1;
 	/* set priority mask for CPU 0 */
-	a9picmmio[4] = 0xff;
-	
-	a9picmmio = (uint8*)0x1f001000;
-	// pic[4]
-	
+	//a9picmmio[4] = 0xff;
+	//a9picmmio = (uint8*)0x1f001000;
 	/* enable PIC */
-	a9picmmio[0] = 1;
-	
-	a9picmmio[0x100 + (36 >> 3)] = (1 << (36 & 7));
-	
-	/* set enable */
-	//for (x = 0x100; x < 0x180; ++x) {
-	//	a9picmmio[x] = 0xff;
-	//}
-
-	/* clear pending interrupt */
-	//for (x = 0x280; x < 0x300; ++x) {
-	//	a9picmmio[x] = 0xff;
-	//}
-	
+	//a9picmmio[0] = 1;
+	//a9picmmio[0x100 + (36 >> 3)] = (1 << (36 & 7));
+		
 	kserdbg_putc('U');
 	
 	arm4_tlbsetmode(KMEMINDEX);
@@ -1112,6 +1092,13 @@ void start() {
 	ks->cproc = process;
 	ks->cthread = th;
 	
+	/*
+		This should be provided by an partialy external module. It
+		can be different for different boards and is choosen during
+		linking of the kernel image.
+	*/
+	kboardInit();
+	
 	#define KMODTYPE_ELFUSER			1
 	/*
 		create a task for any attached modules of the correct type
@@ -1146,12 +1133,12 @@ void start() {
 	/*
 		See datasheet for timer initialization details.
 	*/
-	t0mmio = (uint32*)0x10011000;
-	t0mmio[REG_LOAD] = KTASKTICKS;
-	t0mmio[REG_BGLOAD] = KTASKTICKS;			
-	t0mmio[REG_CTRL] = CTRL_ENABLE | CTRL_MODE_PERIODIC | CTRL_SIZE_32 | CTRL_DIV_NONE | CTRL_INT_ENABLE;
-	t0mmio[REG_INTCLR] = ~0;		/* make sure interrupt is clear (might not be mandatory) */
-	ks->tpers = 1000000;
+	//t0mmio = (uint32*)0x10011000;
+	//t0mmio[REG_LOAD] = KTASKTICKS;
+	//t0mmio[REG_BGLOAD] = KTASKTICKS;			
+	//t0mmio[REG_CTRL] = CTRL_ENABLE | CTRL_MODE_PERIODIC | CTRL_SIZE_32 | CTRL_DIV_NONE | CTRL_INT_ENABLE;
+	//t0mmio[REG_INTCLR] = ~0;		/* make sure interrupt is clear (might not be mandatory) */
+	//ks->tpers = 1000000;
 
 	t0mmio = (uint32*)0x10011200;
 	t0mmio[REG_LOAD] = ~0;

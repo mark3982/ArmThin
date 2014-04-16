@@ -129,17 +129,33 @@ typedef struct _KPROCESS {
 	KTHREAD				*threads;
 } KPROCESS;
 
+
+/* is the scheduler timer active? */
+typedef int (*KBOARDPIC_ISTIMERINT)();
+/* get the timer's current frequency */
+typedef uint64 (*KBOARDPIC_GETTIMERFREQ)();
+/* set the timer ticks before interrupt */
+typedef void (*KBOARDPIC_SETTIMERTICK)(uint64);
+/* clear the timer interrupt */
+typedef void (*KBOARDPIC_CLRTIMERINT)();
+
 typedef struct _KSTATE {
 	/* new process/thread support */
-	KPROCESS		*procs;
-	KPROCESS		*cproc;
-	KTHREAD			*cthread;
-	KTHREAD			*idleth;
-	KPROCESS		*idleproc;
+	KPROCESS					*procs;
+	KPROCESS					*cproc;
+	KTHREAD						*cthread;
+	KTHREAD						*idleth;
+	KPROCESS					*idleproc;
+	
+	/* minimal boot strap interface from board */
+	KBOARDPIC_ISTIMERINT		boardIsTimerINT;
+	KBOARDPIC_GETTIMERFREQ		boardGetTimerFreq;
+	KBOARDPIC_SETTIMERTICK		boardSetTimerTick;
+	KBOARDPIC_CLRTIMERINT		boardClrTimerINT;
 	
 	/* ring buffer (IPC) */
-	KPROCESS		*kservproc;
-	KTHREAD			*kservthread;
+	KPROCESS					*kservproc;
+	KTHREAD						*kservthread;
 	
 	/* physical and heap memory management */
 	KHEAPBM			hphy;			/* kernel physical page heap */
@@ -160,4 +176,7 @@ void stackprinter();
 
 void* kmalloc(uint32 size);
 void kfree(void *ptr);
+
+typedef void (*KPRINTF)(const char *fmt, ...);
+typedef void (*KBOARDMODINIT)(KPRINTF printf);
 #endif

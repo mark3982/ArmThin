@@ -12,6 +12,11 @@ cd fs
 
 cd ../../
 
+cd boards
+cd realview-pb-a
+./compile.sh
+cd ../../
+
 export CCOPTS=-mcpu=cortex-a9
 
 arm-eabi-gcc $CCOPTS -s -I../inc -nostdlib -nostartfiles -ffreestanding -std=gnu99 -c *.c
@@ -25,3 +30,4 @@ echo doing object copy..
 arm-eabi-objcopy -j .text -O binary __armos.bin armos.bin
 ./attachmod.py ./modules/fs/fs ./armos.bin 1
 ./attachmod.py ./modules/testuelf/main ./armos.bin 1
+./attachmod.py ./boards/realview-pb-a/main ./armos.bin 2
