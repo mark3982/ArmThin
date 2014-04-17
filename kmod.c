@@ -14,7 +14,6 @@ KATTMOD *kPkgGetNextMod(KATTMOD *mod) {
 	if (n->signatureA != 0x12345678 || ~n->signatureA != n->signatureB) {
 		return 0;
 	}
-	
 	return n;
 }
 
@@ -30,7 +29,7 @@ uintptr kPkgGetTotalLength() {
 		return (uintptr)&_EOI;
 	}
 	
-	return lm->size + (uintptr)lm;
+	return lm->size + (uintptr)lm + sizeof(KATTMOD) + 1;
 }
 
 /*
@@ -56,5 +55,6 @@ KATTMOD *kPkgGetFirstMod() {
 		}
 	}
 	
+	kprintf("could not find first mod\n");
 	return 0;
 }

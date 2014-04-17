@@ -1,5 +1,14 @@
 #include "corelib/core.h"
 
+void filler() {
+	uint32			*x;
+	
+	x = (uint32*)0;
+	
+	x[0] = 'a';
+	x[1] = 'b';
+}
+
 int main() {
 	int		x;
 	int		y;
@@ -7,6 +16,8 @@ int main() {
 	unsigned int 	*smmio;
 	
 	smmio = (unsigned int*)0xa0000000;
+	
+	smmio[0] = '+';
 	
 	tps = getTicksPerSecond();
 	

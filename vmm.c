@@ -394,9 +394,11 @@ int kvmm2_findregion(KVMMTABLE *vmm, uintptr tc, uintptr low, uintptr high, uint
 	return 0;
 }
 
+
 int kvmm2_allocregion(KVMMTABLE *vmm, uintptr pcnt, uintptr low, uintptr high, uint32 flags, uintptr *out) {
 	uint32			x;
 	uintptr			p;
+	uintptr			phy;
 	KSTATE			*ks;
 	
 	ks = (KSTATE*)KSTATEADDR;
@@ -405,11 +407,29 @@ int kvmm2_allocregion(KVMMTABLE *vmm, uintptr pcnt, uintptr low, uintptr high, u
 		high = low + pcnt * 0x1000;
 	}
 	
-	if (!kvmm2_findregion(vmm, pcnt, low, high, flags, out)) {
-		return 0;
+	if (flags & KVMM2_ALLOCREGION_NOFIND) {
+		/* 
+			this happens when we know were we want to map something, but
+			it may already be mapped therefore the findregion would fail
+			because it looks for a free contingious region of pages....
+			
+			so just pretend it found the range starting at low
+		*/
+		out[0] = low;
+	} else {
+		kprintf("find region low:%x high:%x\n", low, high);
+		if (!kvmm2_findregion(vmm, pcnt, low, high, flags, out)) {
+			return 0;
+		}
 	}
 	
 	for (x = 0; x < pcnt; ++x) {
+		if (flags & KVMM2_ALLOCREGION_NOFIND) {
+			if (kvmm2_getphy(vmm, out[0] + x * 0x1000, &phy)) {
+				/* okay its already been allocated and mapped */
+				continue;
+			}
+		}
 		p = (uintptr)k_heapBMAllocBound(&ks->hphy, 0x1000, 12);
 		/* increment reference count */
 		kvmm2_revinc(p);

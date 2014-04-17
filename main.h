@@ -107,6 +107,9 @@ typedef struct _KTHREAD {
 	struct _KTHREAD		*next;
 	struct _KTHREAD		*prev;
 
+	/* debugging */
+	char				*dbgname;
+	
 	/* thread kernel communication */
 	RBM					krx;			/* kernel server thread address */
 	RBM					ktx;			/* kernel server thread address */
@@ -137,6 +140,9 @@ typedef struct _KSTATE {
 	KTHREAD						*idleth;
 	KPROCESS					*idleproc;
 	
+	/* restart catch (or another cpu starting) */
+	uint32						rescatch;
+	
 	/* board state */
 	void						*bif;
 	
@@ -164,6 +170,7 @@ void stackprinter();
 void* kmalloc(uint32 size);
 void kfree(void *ptr);
 
-int kboardIsTimerINT();
-void kboardInit();
+int kboardCheckAndClearTimerINT();
+void kboardPrePagingInit();
+void kboardPostPagingInit();
 #endif

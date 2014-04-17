@@ -44,9 +44,10 @@ typedef struct _KSTACK {
 #define TLB_DOM(x)			(x<<5)		/* domain value (16 unique values) */
 #define DOM_TLB(x,y)		(x<<(y*2))	/* helper macro for setting appropriate bits in domain register */
 
-#define KVMM_DIRECT			0x80000000
-#define KVMM_SKIP			0x40000000
-#define KVMM_REPLACE		0x20000000
+#define KVMM_DIRECT							0x80000000
+#define KVMM_SKIP							0x40000000
+#define KVMM_REPLACE						0x20000000
+#define KVMM2_ALLOCREGION_NOFIND			0x10000000
 
 int kvmm2_baseinit(uintptr lowaddr);
 int kvmm2_init_revtable();

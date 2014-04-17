@@ -18,6 +18,8 @@ int main() {
 	
 	smmio = (unsigned int*)0xa0000000;
 	
+	smmio[0] = '+';
+	
 	printf("TESTUELF START\n");
 	
 	tps = getTicksPerSecond();

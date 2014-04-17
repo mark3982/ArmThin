@@ -24,15 +24,9 @@ void start(void);
     first file used in the linking process (according to alphanumerical ordering) this code will start at the
     beginning of the .text section.
 */
-void __attribute__((naked)) entry()
-{
-	asm("mov sp, %[ps]" : : [ps]"i" (KSTACKSTART));
-	/* send to serial output */
-	asm("mov r1, #0x16000000");
-	asm("mov r2, #65");
-	asm("str r2, [r1]");
-	/* call main kernel function */
-	asm("bl	start");
+void __attribute__((naked)) entry() {
+	/* branch to board code */
+	asm("b boardEntry");
 }
 
 void test() {
@@ -360,7 +354,7 @@ void ksched() {
 	*/
 	asm("mcr p15, #0, r0, c8, c7, #0");
 	
-	//kprintf("SWITCH-TO thread:%x cpsr:%x fp:%x sp:%x pc:%x\n", kt, kt->cpsr, kt->r11, kt->sp, kt->pc);
+	kprintf("SWITCH-TO thread:%x cpsr:%x fp:%x sp:%x pc:%x dbgname:%s\n", kt, kt->cpsr, kt->r11, kt->sp, kt->pc, kt->dbgname);
 	
 	uint32			*p;
 	
@@ -440,44 +434,14 @@ void k_exphandler(uint32 lr, uint32 type) {
 	
 	ks = (KSTATE*)KSTATEADDR;
 		
-	//kserdbg_putc('H');
-	//kserdbg_putc('\n');
-	
-	/*  clear interrupt in timer so it will lower its INT line
-	
-		if you do not clear it, an interrupt will
-		be immediantly raised apon return from this
-		interrupt
-	*/
+	kserdbg_putc('H');
+	kserdbg_putc('\n');
 	
 	if (type == ARM4_XRQ_IRQ) {
-		picmmio = (uint8*)0x1f001000;
-	
-		//kprintf("picmmio[PIC_IRQ_STATUS]:%x\n", picmmio[PIC_IRQ_STATUS]);
-		/*
-			It is possible that other pins are activated so we just check
-			this one bit.
-			
-			1 << 4
-		*/
-		//if (picmmio[PIC_IRQ_STATUS] & (1<<6)) {
-		//for (x = 0; x < 10; ++x) {
-		//	kprintf("PIC-CHECK:%x\n", picmmio[0x200 + x]);
-		//}
-		//for (;;);
-		if (picmmio[0x200 + (36 >> 3)] & (1 << (36 & 7))) {
-			/* lower timer IRQ line */
-			t0mmio = (uint32*)0x10011000;
-			t0mmio[REG_INTCLR] = 1;			/* according to the docs u can write any value */
-			
-			/* clear pending interrupt with PIC */
-			picmmio[0x280 + (36 >> 3)] = 1 << (36 & 7);
-			
-			//kprintf("t0mmio[REG_BGLOAD]:%x ks->ctime:%x\n", t0mmio[REG_BGLOAD], ks->ctime);
-			
+		if (kboardCheckAndClearTimerINT()) {			
 			/* update current time */
 			ks->ctime += t0mmio[REG_BGLOAD];
-			
+			kprintf("exp_handler calling sched()\n");
 			ksched();
 			//kprintf("time:%x\n", t0mmio[REG_VALUE]);
 			/* go back through normal interrupt return process */
@@ -633,12 +597,25 @@ void k_exphandler(uint32 lr, uint32 type) {
 			which requires that LR not be offset before return.
 		*/
 		KTHREAD			*tmp;
+		uint32			__sp, __lr;
 		
 		tmp = ks->cthread;
 		
 		kprintf("!EXCEPTION\n");
-		kprintf("type:%x cproc:%x cthread:%x lr:%x\n", type, ks->cproc, ks->cthread, lr);
+		kprintf("type:%x cproc:%x cthread:%x lr:%x dbgname:%s\n", type, ks->cproc, ks->cthread, lr, ks->cthread->dbgname);
 
+		asm("mrs r0, cpsr \n\
+			 mov r1, r0 \n\
+			 bic r0, r0, #0x1f \n\
+			 orr r0, r0, #0x1f \n\
+			 msr cpsr, r0 \n\
+			 mov %[sp], sp \n\
+			 mov %[lr], lr \n\
+			 msr cpsr, r1 \n\
+			 " : [sp]"=r" (__sp), [lr]"=r" (__lr));
+		
+		kprintf("sp:%x lr:%x\n", __sp, __lr);
+		
 		if (lr >= (uintptr)&_BOI && lr <= (uintptr)&_EOI) {
 			PANIC("CRITICAL FAILURE: exception in kernel image\n");
 		}
@@ -721,7 +698,7 @@ void memset(void *p, uint8 v, uintptr sz) {
 	}
 }
 
-int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
+KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	ELF32_EHDR			*ehdr;
 	ELF32_SHDR			*shdr;
 	uint32				x, y;
@@ -731,9 +708,11 @@ int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	KTHREAD				*th;
 	uintptr				out, out2;
 	
-	kprintf("loading elf into memory space\n");
+	kprintf("@@ loading elf into memory space\n");
 	
 	ks = (KSTATE*)KSTATEADDR;
+		
+	kprintf("HERE\n");
 		
 	ehdr = (ELF32_EHDR*)addr;
 	if (ehdr->e_machine != EM_ARM) {
@@ -753,7 +732,7 @@ int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	th = (KTHREAD*)kmalloc(sizeof(KTHREAD));
 	memset(th, 0, sizeof(KTHREAD));
 	ll_add((void**)&proc->threads, th);
-
+	
 	th->pc = ehdr->e_entry;
 	th->flags = 0;
 	th->cpsr = 0x60000000 | ARM4_MODE_USER;
@@ -820,7 +799,20 @@ int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 			// sh_offset - byte offset in module
 			// sh_size - size of section in module 
 			// sh_addr - address to load at
-			kvmm2_allocregionat(&proc->vmm, kvmm2_rndup(shdr->sh_size), shdr->sh_addr, TLB_C_AP_FULLACCESS);
+			
+			/*
+				The KVMM2_ALLOCREGION_NOFIND basically says to allocate a region
+				starting at the specified address, BUT ignore any pages that have
+				already been allocated. This helps when sections overlap on pages
+				and would cause it to fail because the memory is already mapped.
+			*/
+			kprintf("elf-load    virtual:%x size:%x\n", shdr->sh_addr, shdr->sh_size);
+			kvmm2_allocregionat(	&proc->vmm, 
+									kvmm2_rndup(shdr->sh_size), 
+									shdr->sh_addr, 
+									TLB_C_AP_FULLACCESS | KVMM2_ALLOCREGION_NOFIND
+			);
+			
 			fb = (uint8*)(addr + shdr->sh_offset);
 			/* copy */
 			//kprintf("    elf copying\n");
@@ -837,6 +829,8 @@ int kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	arm4_tlbset1(oldpage);
 	/* flush TLB */
 	asm("mcr p15, #0, r0, c8, c7, #0");
+	
+	return th;
 }
 
 int ksleep(uint32 timeout) {
@@ -871,13 +865,6 @@ void kthread(KTHREAD *myth) {
 	uint32			tt, bytes;
 	uint32			cycle;
 	
-	t0mmio = (uint32*)0x10011000;
-	
-	st = 0xffffffff - t0mmio[REG_VALUE];
-	tt = 0;
-	bytes = 0;
-	cycle = 0;
-	
 	ks = (KSTATE*)KSTATEADDR;
 	
 	for (;;) {
@@ -888,8 +875,9 @@ void kthread(KTHREAD *myth) {
 					/* ring buffer not instanced */
 					continue;
 				}
-				
+				kprintf("[kthread] reading RB\n");
 				for (sz = sizeof(pkt); rb_read_nbio(&th->ktx, &pkt[0], &sz, 0); sz = sizeof(pkt)) {
+					kprintf("[kthread] got pkt\n");
 					/* check packet type */
 					switch (pkt[0] & 0xff) {
 						case 0:
@@ -926,6 +914,7 @@ void kthread(KTHREAD *myth) {
 				}
 			}
 		}
+		kprintf("[kthread] sleeping\n");
 		ksleep(ks->tpers * 5);
 	}
 }
@@ -944,7 +933,6 @@ void start() {
 	int			x;
 	uint32		lock;
 	uint32		*utlb, *ktlb;
-	char		buf[128];
 	uint32		*a, *b;
 	uint8		*bm;
 	uint32		*tlbsub;
@@ -956,7 +944,25 @@ void start() {
 	KPROCESS	*process;
 	KTHREAD		*th;
 	
+	uint32		cpuid;
+	uint32		*scu;
+	
 	ks = (KSTATE*)KSTATEADDR;
+	
+	asm("mrc p15, 0, %[cpuid], c0, c0, 5" : [cpuid]"=r" (cpuid));
+	kprintf("cpuid:%x\n", cpuid);
+	
+	/*
+		some debugging to catch restarts or another cpu entering
+	*/
+	if (ks->rescatch != 0) {	
+		++ks->rescatch;
+		kprintf("RESTART CAUGHT %x\n", ks->rescatch);
+		for (;;);
+	}
+	ks->rescatch = 1;
+	
+	kprintf("ks->rescatch:%x\n", ks->rescatch);
 	
 	memset(ks, 0, sizeof(KSTATE));
 	
@@ -1017,19 +1023,16 @@ void start() {
 	/* map reverse table (ALREADY MAPPED WITH HCHK BELOW) */
 	/* map interrupt table, and chunk heap (hchk) */
 	kvmm2_mapmulti(&ks->vmm, 0, 0, kvmm2_rndup(KRAMADDR), TLB_C_AP_PRIVACCESS | KVMM_DIRECT | KVMM_SKIP);
-	
-	//a9picmmio = (uint8*)0x1f000100;
-	/* enable PIC for CPU 0 */
-	//a9picmmio[0] = 1;
-	/* set priority mask for CPU 0 */
-	//a9picmmio[4] = 0xff;
-	//a9picmmio = (uint8*)0x1f001000;
-	/* enable PIC */
-	//a9picmmio[0] = 1;
-	//a9picmmio[0x100 + (36 >> 3)] = (1 << (36 & 7));
+
+	/*
+		This should be provided by an partialy external module. It
+		can be different for different boards and is choosen during
+		linking of the kernel image.
+	*/
+	kboardPrePagingInit();	
 		
 	kserdbg_putc('U');
-	
+
 	arm4_tlbsetmode(KMEMINDEX);
 	/* load location of TLB */
 	arm4_tlbset1((uintptr)ks->vmm.table);	/* user space */
@@ -1069,9 +1072,11 @@ void start() {
 	ll_add((void**)&process->threads, th);
 	th->pc = (uintptr)&kthread;
 	th->flags = 0;
+	th->dbgname = "KTHREAD";
 	th->cpsr = 0x60000000 | ARM4_MODE_SYS;
 	/* set stack */
-	th->sp = (uintptr)kmalloc(1024 * 2) + 1024 * 2 - 8;
+	th->sp = (uintptr)kmalloc(1024 * 2) + 1024 * 2;
+	kprintf("kthread initial-sp:%x\n", th->sp);
 	th->r0 = (uint32)th;
 	ks->kservthread = th;
 	ks->kservproc = process;
@@ -1081,6 +1086,7 @@ void start() {
 	ll_add((void**)&process->threads, th);
 	th->pc = (uintptr)&kidle;
 	th->flags = KTHREAD_KIDLE;
+	th->dbgname = "KIDLE";
 	th->cpsr = 0x60000000 | ARM4_MODE_SYS;
 	/* set stack (dont need anything big for idle thread at the moment) */
 	th->sp = (uintptr)kmalloc(128) + 128 - 8;
@@ -1091,18 +1097,12 @@ void start() {
 	/* just to get things started */
 	ks->cproc = process;
 	ks->cthread = th;
-	
-	/*
-		This should be provided by an partialy external module. It
-		can be different for different boards and is choosen during
-		linking of the kernel image.
-	*/
-	kboardInit();
-	
+		
 	#define KMODTYPE_ELFUSER			1
 	/*
 		create a task for any attached modules of the correct type
 	*/
+
 	kprintf("looking at attached modules\n");
 	for (m = kPkgGetFirstMod(); m; m = kPkgGetNextMod(m)) {
 		kprintf("looking at module\n");
@@ -1112,10 +1112,12 @@ void start() {
 			memset(process, 0, sizeof(KPROCESS));
 			ll_add((void**)&ks->procs, process);
 			/* will create thread in process */
-			kelfload(process, (uintptr)&m->slot[0], m->size);
+			th = kelfload(process, (uintptr)&m->slot[0], m->size);
+			th->dbgname = "USERMODULE";
 		}
+		kprintf("looking for NEXT module..\n");
 	}
-	
+
 	/* enable IRQ */
 	arm4_cpsrset(arm4_cpsrget() & ~((1 << 7) | (1 << 6)));
 	
@@ -1140,13 +1142,17 @@ void start() {
 	//t0mmio[REG_INTCLR] = ~0;		/* make sure interrupt is clear (might not be mandatory) */
 	//ks->tpers = 1000000;
 
-	t0mmio = (uint32*)0x10011200;
-	t0mmio[REG_LOAD] = ~0;
-	t0mmio[REG_BGLOAD] = ~0;
-	t0mmio[REG_CTRL] = CTRL_ENABLE | CTRL_MODE_PERIODIC | CTRL_SIZE_32 | CTRL_DIV_16;
-	t0mmio[REG_INTCLR] = ~0;		/* make sure interrupt is clear (might not be mandatory) */
+	//t0mmio = (uint32*)0x10011200;
+	//t0mmio[REG_LOAD] = ~0;
+	//t0mmio[REG_BGLOAD] = ~0;
+	//t0mmio[REG_CTRL] = CTRL_ENABLE | CTRL_MODE_PERIODIC | CTRL_SIZE_32 | CTRL_DIV_16;
+	//t0mmio[REG_INTCLR] = ~0;		/* make sure interrupt is clear (might not be mandatory) */
 	
-	kserdbg_putc('K');
+	//kprintf("kboardPostPagingInit()\n");
+	
+	kboardPostPagingInit();
+	
+	kserdbg_putc('Q');
 	kserdbg_putc('\n');
 	/* 
 		infinite loop 

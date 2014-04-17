@@ -77,7 +77,12 @@ def makeModule(cfg, dir, out):
 	res, objs = compileDirectory(cfg, dir)
 		
 	objs = ' '.join(objs)
-	if executecmd(dir, '%s -o ../%s.mod ../../corelib/core.o ../../corelib/rb.o %s' % (cfg['LD'], out, objs), cmdshow=cfg['cmdshow']) is False:
+	# the -N switch has to prevent the file_offset in the elf32 from being
+	# equal to the VMA address which was bloating the modules way too much
+	# now they should be aligned to a 4K boundary or something similar
+	if executecmd(dir, '%s -T ../../module.link -N -o ../%s.mod ../../corelib/core.o ../../corelib/rb.o %s' % (cfg['LD'], out, objs), cmdshow=cfg['cmdshow']) is False:
+		return False
+	if executecmd(dir, '%s -S ../%s.mod ../%s.mod' % (cfg['OBJCOPY'], out, out), cmdshow=cfg['cmdshow']) is False:
 		return False
 	pass
 	
@@ -90,13 +95,24 @@ def makeKernel(cfg, dir, out, bobjs):
 	res, objs = compileDirectory(cfg, dir)
 	if res is False:
 		return False
+	
+	# make sure main.o is linked first
+	_objs = []
+	for obj in objs:
+		print('obj', obj)
+		if obj != 'main.o':
+			_objs.append(obj)
+	objs = _objs
+	
 	objs = ' '.join(objs)
 	bobjs = ' '.join(bobjs)
+	
+	tmp = out
 	# link it
-	if executecmd(dir, '%s -T link.ld -o __tmp.bin ./corelib/rb.o %s %s' % (cfg['LD'], objs, bobjs), cmdshow=cfg['cmdshow']) is False:
+	if executecmd(dir, '%s -T link.ld -o %s main.o ./corelib/rb.o %s %s' % (cfg['LD'], tmp, objs, bobjs), cmdshow=cfg['cmdshow']) is False:
 		return False
 	# strip it
-	if executecmd(dir, '%s -j .text -O binary __tmp.bin %s' % (cfg['OBJCOPY'], out), cmdshow=cfg['cmdshow']) is False:
+	if executecmd(dir, '%s -j .text -O binary %s %s' % (cfg['OBJCOPY'], tmp, out), cmdshow=cfg['cmdshow']) is False:
 		return False
 	return True
 '''
@@ -113,10 +129,12 @@ def make(cfg):
 	for mdir in nodes:
 		if os.path.isdir('%s/%s' % (cfg['dirofmodules'], mdir)) is False:
 			continue
-		makeModule(		cfg = cfg, 
-						dir = '%s/%s' % (cfg['dirofmodules'], mdir), 
-						out = mdir
+		res = makeModule(		cfg = cfg, 
+								dir = '%s/%s' % (cfg['dirofmodules'], mdir), 
+								out = mdir
 		)
+		if res is False:
+			return False
 		
 	nodes = os.listdir(cfg['dirofboards'])
 	# compile boards
@@ -140,12 +158,13 @@ def make(cfg):
 				bobjs.append('%s/%s/%s' % (cfg['dirofboards'], bdir, o))
 		
 	# compile kernel
-	makeKernel(cfg, dir = './', out = cfg['kimg'], bobjs = bobjs)
+	if makeKernel(cfg, dir = './', out = cfg['kimg'], bobjs = bobjs) is False:
+		return False
 	
 	# attach modules
 	for mod in modules:
 		sz = attachmod.attach('%s/%s.mod' % (cfg['dirofmodules'], mod), cfg['kimg'], 1)
-		print((bcolors.HEADER + bcolors.OKBLUE + 'attached [' + bcolors.OKGREEN + '%s' + bcolors.OKBLUE + '] @ %s bytes' + bcolors.ENDC) % (bdir, sz))
+		print((bcolors.HEADER + bcolors.OKBLUE + 'attached [' + bcolors.OKGREEN + '%s' + bcolors.OKBLUE + '] @ %s bytes' + bcolors.ENDC) % (mod, sz))
 	return True
 
 def readfile(path):
@@ -171,7 +190,9 @@ cfg['ldflags'] = ''
 cfg['cmdshow'] = False
 
 def showHelp():
-		print('help!!')
+		print('%-20sdisplays list of modules' % 'showmodules')
+		print('%-20sdisplays list of boards' % 'showboards')
+		print('%-20sbuilds the system' % 'make <board> <modules..>')
 
 if len(sys.argv) < 2:
 	showHelp()
@@ -195,5 +216,18 @@ else:
 			print((bcolors.HEADER + bcolors.OKGREEN + '%-20s%s' + bcolors.ENDC) % (node, info))
 		exit()
 	if farg == 'make':
-		make(cfg)
-		exit()
+		if len(sys.argv) < 3:
+			print('missing <board> argument (first argument)')
+			exit()
+		cfg['board'] = sys.argv[2]
+	
+		mods = []
+		x = 3
+		while x < len(sys.argv):
+			mods.append(sys.argv[x])
+			x = x + 1
+		cfg['modules'] = mods
+		if make(cfg) is False:
+			exit(-1)
+		exit(0)
+	showHelp()
