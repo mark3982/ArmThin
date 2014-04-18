@@ -434,14 +434,14 @@ void k_exphandler(uint32 lr, uint32 type) {
 	
 	ks = (KSTATE*)KSTATEADDR;
 		
-	kserdbg_putc('H');
-	kserdbg_putc('\n');
+	//kserdbg_putc('H');
+	//kserdbg_putc('\n');
 	
 	if (type == ARM4_XRQ_IRQ) {
 		if (kboardCheckAndClearTimerINT()) {			
 			/* update current time */
-			ks->ctime += t0mmio[REG_BGLOAD];
-			kprintf("exp_handler calling sched()\n");
+			ks->ctime += kboardGetTimerTick();
+			kprintf("IRQ: ctime:%x timer-tick:%x\n", ks->ctime, kboardGetTimerTick());
 			ksched();
 			//kprintf("time:%x\n", t0mmio[REG_VALUE]);
 			/* go back through normal interrupt return process */
@@ -571,6 +571,8 @@ void k_exphandler(uint32 lr, uint32 type) {
 
 				ks->cthread->flags |= KTHREAD_SLEEPING;
 				if (r0 != 0) {
+					kprintf("TEST %x\n", ks->ctime);
+					kprintf("SLEEP total:%x r0:%x ks->ctime:%x\n", r0 + ks->ctime, r0, ks->ctime);
 					ks->cthread->timeout = r0 + ks->ctime;
 				} else {
 					ks->cthread->timeout = 0;
@@ -915,7 +917,7 @@ void kthread(KTHREAD *myth) {
 			}
 		}
 		kprintf("[kthread] sleeping\n");
-		ksleep(ks->tpers * 5);
+		ksleep(ks->tpers * 10);
 	}
 }
 
@@ -947,27 +949,6 @@ void start() {
 	uint32		cpuid;
 	uint32		*scu;
 	
-	ks = (KSTATE*)KSTATEADDR;
-	
-	asm("mrc p15, 0, %[cpuid], c0, c0, 5" : [cpuid]"=r" (cpuid));
-	kprintf("cpuid:%x\n", cpuid);
-	
-	/*
-		some debugging to catch restarts or another cpu entering
-	*/
-	if (ks->rescatch != 0) {	
-		++ks->rescatch;
-		kprintf("RESTART CAUGHT %x\n", ks->rescatch);
-		for (;;);
-	}
-	ks->rescatch = 1;
-	
-	kprintf("ks->rescatch:%x\n", ks->rescatch);
-	
-	memset(ks, 0, sizeof(KSTATE));
-	
-	kserdbg_putc('Y');
-	
 	arm4_xrqinstall(ARM4_XRQ_RESET, &k_exphandler_reset_entry);
 	arm4_xrqinstall(ARM4_XRQ_UNDEF, &k_exphandler_undef_entry);
 	arm4_xrqinstall(ARM4_XRQ_SWINT, &k_exphandler_swi_entry);
@@ -975,55 +956,36 @@ void start() {
 	arm4_xrqinstall(ARM4_XRQ_ABRTD, &k_exphandler_abrtd_entry);
 	arm4_xrqinstall(ARM4_XRQ_IRQ, &k_exphandler_irq_entry);
 	arm4_xrqinstall(ARM4_XRQ_FIQ, &k_exphandler_fiq_entry);
+	
+	ks = (KSTATE*)KSTATEADDR;
+	
+	asm("mrc p15, 0, %[cpuid], c0, c0, 5" : [cpuid]"=r" (cpuid));
+	kprintf("cpuid:%x\n", cpuid);
 
-	/* get end of image w/ mods */
-	eoiwmods = kPkgGetTotalLength();
+	/* system specific initialization (currently included with board module) */
+	systemPreInitialization();
 	
-	kprintf("eoiwmods:%x\n", eoiwmods);
+	kserdbg_putc('Y');
 	
-	/* create physical page heap */
-	k_heapBMInit(&ks->hphy);
-	k_heapBMInit(&ks->hchk);
-	/* get a bit of memory to start with for small chunk */
-	k_heapBMAddBlock(&ks->hchk, 4 * 7, KRAMADDR - (4 * 7), KCHKHEAPBSIZE);
-	
-	/* state structure */
-	k_heapBMSet(&ks->hchk, KSTATEADDR, sizeof(KSTATE), 5);
-	/* stacks (can free KSTACKSTART later) */
-	k_heapBMSet(&ks->hchk, KSTACKSTART - 0x1000, 0x1000, 6);
-	k_heapBMSet(&ks->hchk, KSTACKEXC - 0x1000, 0x1000, 7);
-	k_heapBMSet(&ks->hchk, (uintptr)&_BOI, eoiwmods - (uintptr)&_BOI, 8);
-	
-	/* add block but place header in chunk heap to keep alignment */
-	bm = (uint8*)k_heapBMAlloc(&ks->hchk, k_heapBMGetBMSize(KRAMSIZE - KRAMADDR, KPHYPAGESIZE));
-	k_heapBMAddBlockEx(&ks->hphy, KRAMADDR, KRAMSIZE - KRAMADDR, KPHYPAGESIZE, (KHEAPBLOCKBM*)k_heapBMAlloc(&ks->hchk, sizeof(KHEAPBLOCKBM)), bm, 0);
-	
-	kserdbg_putc('L');	
-	/* 
-		remove kernel image region 
-		
-		This ensures it does not reside in either one. Because, KRAMADDR can change we can not
-		be sure if it resides in which one or if it spans both somehow so to be safe this works
-		quite well.
-	*/
-	k_heapBMSet(&ks->hphy, (uintptr)&_BOI, eoiwmods - (uintptr)&_BOI, 8);
-
 	kserdbg_putc('D');
 	
 	/* vmm */
-	kvmm2_baseinit(KRAMADDR);
+	kvmm2_baseinit();
 	
 	kserdbg_putc('J');
 	/* map kernel image */
+	eoiwmods = kPkgGetTotalLength();
+	kprintf("HERE1\n");
 	kvmm2_mapmulti(&ks->vmm, 
 					(uintptr)&_BOI, (uintptr)&_BOI,
 					kvmm2_rndup(eoiwmods - (uintptr)&_BOI), 
 					TLB_C_AP_PRIVACCESS | KVMM_DIRECT
 	);
+	kprintf("HERE2\n");
 	/* map reverse table (ALREADY MAPPED WITH HCHK BELOW) */
 	/* map interrupt table, and chunk heap (hchk) */
 	kvmm2_mapmulti(&ks->vmm, 0, 0, kvmm2_rndup(KRAMADDR), TLB_C_AP_PRIVACCESS | KVMM_DIRECT | KVMM_SKIP);
-
+	kprintf("HERE3\n");
 	/*
 		This should be provided by an partialy external module. It
 		can be different for different boards and is choosen during

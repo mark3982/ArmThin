@@ -49,7 +49,7 @@ typedef struct _KSTACK {
 #define KVMM_REPLACE						0x20000000
 #define KVMM2_ALLOCREGION_NOFIND			0x10000000
 
-int kvmm2_baseinit(uintptr lowaddr);
+int kvmm2_baseinit();
 int kvmm2_init_revtable();
 int kvmm2_init(KVMMTABLE *t);
 int kvmm2_mapmulti(KVMMTABLE *vmm, uintptr v, uintptr p, uintptr c, uint32 flags);
@@ -73,7 +73,7 @@ uintptr kvmm2_rndup(uintptr sz);
 uint32 kvmm2_revdec(uintptr v);
 uint32 kvmm2_revinc(uintptr v);
 
-int kstack_init(KSTACK *stack, uintptr lowaddr);
+int kstack_init(KSTACK *stack);
 int kstack_push(KSTACK *stack, uint32 v);
 int kstack_pop(KSTACK *stack, uint32 *v);
 int kstack_empty(KSTACK *stack);

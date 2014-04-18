@@ -71,7 +71,7 @@ int kstack_push(KSTACK *stack, uint32 v) {
 	gracefully fail if unable to initialize. It may initialize with paging on but it is
 	not reliable.
 */
-int kstack_init(KSTACK *stack, uintptr lowaddr) {
+int kstack_init(KSTACK *stack) {
 	KSTACKBLOCK				*b;
 	KSTATE					*ks;
 	uint32					x;
@@ -163,14 +163,14 @@ uintptr kvmm2_revget(uintptr p, uint8 opt) {
 }
 
 int kvmm2_getu4k(KVMMTABLE *vmm, uintptr *o, uint32 flags) {
-	uint32			x, y;
+	int32			x, y;
 	uint32			*t, *st;
 	uint32			sp;
 	
 	t = (uint32*)vmm->table;
 		
 	/* check 1MB coarse table entries */
-	for (x = 0; x < 4096; ++x) {
+	for (x = 4095; x > -1; --x) {
 		if ((t[x] & 3) != 0) {
 			/* get physical address of level 2 table */
 			st = (uint32*)(t[x] & ~0x3ff);
@@ -182,9 +182,10 @@ int kvmm2_getu4k(KVMMTABLE *vmm, uintptr *o, uint32 flags) {
 				}
 			}
 			/* look through table for empty entry */
-			for (y = 0; y < 256; ++y) {
+			for (y = 255; y > -1; --y) {
 				if ((st[y] & 3) == 0) {
 					*o = (x << 20) | (y << 12);
+					kprintf("*o:%x\n", *o);
 					return 1;
 				}
 			}
@@ -469,6 +470,7 @@ int kvmm2_mapsingle(KVMMTABLE *vmm, uintptr v, uintptr p, uint32 flags) {
 		/* maybe split this function into one to init/prep and one to actually get page */
 		kvmm2_get1Ktable((uintptr*)&st, flags);
 		/* TODO: put table back into stack if not used */
+		kprintf("1K:%x\n", st);
 	}
 	
 	if ((t[v >> 20] & 3) == 0) {
@@ -605,6 +607,7 @@ int kvmm2_mapmulti(KVMMTABLE *vmm, uintptr v, uintptr p, uintptr c, uint32 flags
 	int				ret;
 	
 	for (x = 0; x < c; ++x) {
+		/*kprintf("multi v:%x p:%x\n", v + 0x1000 * x, p + 0x1000 * x);*/
 		ret = kvmm2_mapsingle(vmm, v + 0x1000 * x, p + 0x1000 * x, flags);  
 		if (!ret) {
 			PANIC("mapmulti-failed");
@@ -691,7 +694,7 @@ int kvmm2_init_revtable() {
 	return 1;
 }
 
-int kvmm2_baseinit(uintptr lowaddr) {
+int kvmm2_baseinit() {
 	KSTATE			*ks;
 	uint32			x;
 	char			buf[128];
@@ -711,8 +714,9 @@ int kvmm2_baseinit(uintptr lowaddr) {
 	kvmm2_init_revtable();
 
 	/* initial table stack*/
-	kstack_init(&ks->tstack, lowaddr);
+	kstack_init(&ks->tstack);
 	
 	/* map kernel page table (when we enable paging we still want to access it) */
+	kprintf("ks->vmm.table:%x\n", ks->vmm.table);
 	kvmm2_mapmulti(&ks->vmm, (uintptr)ks->vmm.table, (uintptr)ks->vmm.table, 4, TLB_C_AP_PRIVACCESS | KVMM_DIRECT);
 }

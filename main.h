@@ -155,7 +155,7 @@ typedef struct _KSTATE {
 	KHEAPBM			hchk;			/* data chunk heap */
 	
 	/* time management */
-	uint64			ctime;
+	uint32			ctime;
 	uint32			tpers;			/* ticks per second */
 	
 	/* virtual memory management */
@@ -173,4 +173,5 @@ void kfree(void *ptr);
 int kboardCheckAndClearTimerINT();
 void kboardPrePagingInit();
 void kboardPostPagingInit();
+uint32 kboardGetTimerTick();
 #endif

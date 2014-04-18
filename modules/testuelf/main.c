@@ -33,6 +33,7 @@ int main() {
 		sleep(1);
 		printf("TESTUELF RANGE %x\n", ((uint8*)0x80000400)[0]);
 		smmio[0] = 'B';
+		smmio[0] = '\n';
 	}
 	return 0;
 }
