@@ -5,6 +5,7 @@
 
 typedef struct _KVMMTABLE {
 	uint32			*table;
+	uint32			lock;		/* only one concurrent execution state at a time */
 } KVMMTABLE;
 
 typedef struct _KSTACKBLOCK {

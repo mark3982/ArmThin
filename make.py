@@ -82,12 +82,13 @@ def makeModule(cfg, dir, out):
 	# now they should be aligned to a 4K boundary or something similar
 	if executecmd(dir, '%s -T ../../module.link -N -o ../%s.mod ../../corelib/core.o ../../corelib/rb.o %s' % (cfg['LD'], out, objs), cmdshow=cfg['cmdshow']) is False:
 		return False
-	if executecmd(dir, '%s -S ../%s.mod ../%s.mod' % (cfg['OBJCOPY'], out, out), cmdshow=cfg['cmdshow']) is False:
-		return False
+	#if executecmd(dir, '%s -S ../%s.mod ../%s.mod' % (cfg['OBJCOPY'], out, out), cmdshow=cfg['cmdshow']) is False:
+	#	return False
 	pass
 	
 def compileCoreLIB(cfg, dir):
-	pass
+	res, objs = compileDirectory(cfg, dir)
+	return res
 
 def makeKernel(cfg, dir, out, bobjs):
 	print(bcolors.HEADER + bcolors.OKGREEN + 'kernel-compile' + bcolors.ENDC)
@@ -109,7 +110,9 @@ def makeKernel(cfg, dir, out, bobjs):
 	
 	tmp = out
 	# link it
-	if executecmd(dir, '%s -T link.ld -o %s main.o ./corelib/rb.o %s %s' % (cfg['LD'], tmp, objs, bobjs), cmdshow=cfg['cmdshow']) is False:
+	# %s/libgcc.a
+	#  cfg['LIBGCCPATH'],
+	if executecmd(dir, '%s -T link.ld -o %s main.o -L%s ./corelib/rb.o %s %s -lgcc' % (cfg['LD'], tmp, cfg['LIBGCCPATH'], objs, bobjs), cmdshow=cfg['cmdshow']) is False:
 		return False
 	# strip it
 	if executecmd(dir, '%s -j .text -O binary %s %s' % (cfg['OBJCOPY'], tmp, out), cmdshow=cfg['cmdshow']) is False:
@@ -188,6 +191,7 @@ cfg['modules'] = ['testuelf', 'fs']
 cfg['kimg'] = './armos.bin'
 cfg['ldflags'] = ''
 cfg['cmdshow'] = False
+cfg['LIBGCCPATH'] = '/home/kmcguire/opt/cross/lib/gcc/arm-eabi/4.8.2/'
 
 def showHelp():
 		print('%-20sdisplays list of modules' % 'showmodules')

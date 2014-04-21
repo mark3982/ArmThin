@@ -58,14 +58,18 @@
 #define PANIC(msg) kprintf("PANIC %s LINE %x [%s]\n", __FILE__, __LINE__, msg); stackprinter(); for (;;)
 #define ASSERTPANIC(cond, msg) if (!(cond)) { PANIC(msg); }
 
+#define GETKS() kboardGetCPUState()->ks
+
 #define KEXP_TOPSWI \
 	uint32			lr; \
-	asm("mov sp, %[ps]" : : [ps]"i" (KSTACKEXC)); \
-	asm("push {lr}"); \
-	asm("push {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12}"); \
-	asm("mrs r0, spsr"); \
-	asm("push {r0}"); \
-	asm("mov %[ps], lr" : [ps]"=r" (lr));	
+	asm( \
+		"mov sp, %[excsp]\n" \
+		"push {lr}\n" \
+		"push {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12}\n" \
+		"mrs r0, spsr\n" \
+		"push {r0}\n" \
+		"mov %[lr], lr\n" \
+		: [lr]"=r" (lr) : [excsp]"i" (KSTACKEXC));
 
 #define KEXP_BOTSWI \
 	asm("pop {r0}"); \
@@ -165,6 +169,11 @@ typedef struct _KSTATE {
 	uint32			*vmm_rev;		/* reverse map */
 } KSTATE;
 
+typedef struct _KCPUSTATE {
+	uintptr			excstack;
+	KSTATE			*ks;
+} KCPUSTATE;
+
 void stackprinter();
 
 void* kmalloc(uint32 size);
@@ -174,4 +183,5 @@ int kboardCheckAndClearTimerINT();
 void kboardPrePagingInit();
 void kboardPostPagingInit();
 uint32 kboardGetTimerTick();
+KCPUSTATE *kboardGetCPUState();				/* CPU local data and KERNEL local data */
 #endif

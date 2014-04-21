@@ -29,14 +29,6 @@ void __attribute__((naked)) entry() {
 	asm("b boardEntry");
 }
 
-void test() {
-	uint32			m;
-	uint32			n;
-	
-	m = 0xbb;
-	n = katomic_exchange(&m, 0xaa);
-}
-
 /* small chunk memory alloc/free */
 void kfree(void *ptr) {
 	KSTATE			*ks;
@@ -443,7 +435,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 			ks->ctime += kboardGetTimerTick();
 			kprintf("IRQ: ctime:%x timer-tick:%x\n", ks->ctime, kboardGetTimerTick());
 			ksched();
-			//kprintf("time:%x\n", t0mmio[REG_VALUE]);
+			kprintf("...EXIT\n");
 			/* go back through normal interrupt return process */
 			return;
 		}
@@ -600,11 +592,14 @@ void k_exphandler(uint32 lr, uint32 type) {
 		*/
 		KTHREAD			*tmp;
 		uint32			__sp, __lr;
+		uint32			cpu;
+		
+		cpu = boardGetCPUID();
 		
 		tmp = ks->cthread;
 		
 		kprintf("!EXCEPTION\n");
-		kprintf("type:%x cproc:%x cthread:%x lr:%x dbgname:%s\n", type, ks->cproc, ks->cthread, lr, ks->cthread->dbgname);
+		kprintf("CPU:%x type:%x cproc:%x cthread:%x lr:%x dbgname:%s\n", cpu, type, ks->cproc, ks->cthread, lr, ks->cthread->dbgname);
 
 		asm("mrs r0, cpsr \n\
 			 mov r1, r0 \n\
@@ -809,8 +804,20 @@ KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 				and would cause it to fail because the memory is already mapped.
 			*/
 			kprintf("elf-load    virtual:%x size:%x\n", shdr->sh_addr, shdr->sh_size);
+			
+			/*
+				allocregionat will drop the lower 12 bits, and doing so rndup might result
+				in the value of 1, but if sh_addr+sh_size crossed a page boundary then we
+				need to allocate one more page to cover that
+			*/
+			if (((shdr->sh_addr + shdr->sh_size) & ~0xFFF) != (shdr->sh_addr & ~0xFFF)) {
+				y = kvmm2_rndup(shdr->sh_size) + 1;
+			} else {
+				y = kvmm2_rndup(shdr->sh_size);
+			}
+			
 			kvmm2_allocregionat(	&proc->vmm, 
-									kvmm2_rndup(shdr->sh_size), 
+									y, 
 									shdr->sh_addr, 
 									TLB_C_AP_FULLACCESS | KVMM2_ALLOCREGION_NOFIND
 			);
@@ -820,7 +827,7 @@ KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 			//kprintf("    elf copying\n");
 			for (y = 0; y < shdr->sh_size; ++y) {
 				((uint8*)shdr->sh_addr)[y] = fb[y];
-				//kprintf("    @:%x:%x:%x\n", shdr->sh_addr + y, fb[y], ((uint8*)shdr->sh_addr)[y]);
+				//kprintf("     y:%x\n", y + shdr->sh_addr);
 			}
 			//kprintf("    done\n");
 			//for (y = 0; y < 0x6ffffff; ++y);
@@ -831,7 +838,7 @@ KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	arm4_tlbset1(oldpage);
 	/* flush TLB */
 	asm("mcr p15, #0, r0, c8, c7, #0");
-	
+	kprintf("     elf-load: DONE\n");
 	return th;
 }
 
@@ -969,23 +976,6 @@ void start() {
 	
 	kserdbg_putc('D');
 	
-	/* vmm */
-	kvmm2_baseinit();
-	
-	kserdbg_putc('J');
-	/* map kernel image */
-	eoiwmods = kPkgGetTotalLength();
-	kprintf("HERE1\n");
-	kvmm2_mapmulti(&ks->vmm, 
-					(uintptr)&_BOI, (uintptr)&_BOI,
-					kvmm2_rndup(eoiwmods - (uintptr)&_BOI), 
-					TLB_C_AP_PRIVACCESS | KVMM_DIRECT
-	);
-	kprintf("HERE2\n");
-	/* map reverse table (ALREADY MAPPED WITH HCHK BELOW) */
-	/* map interrupt table, and chunk heap (hchk) */
-	kvmm2_mapmulti(&ks->vmm, 0, 0, kvmm2_rndup(KRAMADDR), TLB_C_AP_PRIVACCESS | KVMM_DIRECT | KVMM_SKIP);
-	kprintf("HERE3\n");
 	/*
 		This should be provided by an partialy external module. It
 		can be different for different boards and is choosen during
@@ -1079,7 +1069,11 @@ void start() {
 		}
 		kprintf("looking for NEXT module..\n");
 	}
+	
+	kprintf("....\n");
 
+	// 6 is 0 (fiq)  F
+	// 7 is 1 (irq)  I
 	/* enable IRQ */
 	arm4_cpsrset(arm4_cpsrget() & ~((1 << 7) | (1 << 6)));
 	
@@ -1111,6 +1105,8 @@ void start() {
 	//t0mmio[REG_INTCLR] = ~0;		/* make sure interrupt is clear (might not be mandatory) */
 	
 	//kprintf("kboardPostPagingInit()\n");
+	
+	kprintf("kboardPostPagingInit()\n");
 	
 	kboardPostPagingInit();
 	

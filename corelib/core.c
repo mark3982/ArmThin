@@ -200,15 +200,14 @@ int rb_read_bio(RBM *rbm, void *p, uint32 *sz, uint32 *advance, uint32 timeout) 
 RBM				__corelib_rx;
 RBM				__corelib_tx;
 
-/*
-void __attribute__((naked)) _start() {
-	asm("mov r3, #0");
-	for (;;);
-	asm("mov r1, #0x16000000");
-	asm("mov r2, sp");
-	asm("str r2, [r1]");
-	for(;;);
-}*/
+void __attribute__((naked)) __start() {
+	asm("	__localloop:\n\
+			mov r1, #0xa0000000\n\
+			mov r2, #69\n\
+			str r2, [r1]\n\
+			b __localloop"
+		);
+}
 
 //int rb_read_bio(RBM volatile *rbm, void *p, uint32 *sz, uint32 *advance, uint32 timeout) {
 void _start(uint32 rxaddr, uint32 txaddr, uint32 txrxsz) {

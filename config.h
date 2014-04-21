@@ -5,10 +5,11 @@
 	============== CONFIGURATION =============
 */
 /* the intial kernel stack and the exception stack */
-#define KSTACKSTART 0x2000		/* descending */
-#define KSTACKEXC   0x3000		/* descending */
+#define KSTACKSTART 		0x2000		/* descending */
+#define KSTACKEXC   		0x3000		/* descending */
 /* somewhere to place the kernel state structure */
-#define KSTATEADDR	0x3000
+#define KSTATEADDR			0x3000
+#define KMAXCPU				0xf
 /* 
 	RAM is assumed to start at 0x0, but we have to leave room for a little setup code, and
 	depending on how much physical memory (KRAMSIZE) we are using we might have to adjust

@@ -325,17 +325,18 @@ int kvmm2_getphy(KVMMTABLE *vmm, uintptr v, uintptr *o) {
 	
 	/* get sub table physical address */
 	t = (uint32*)(t[v >> 20] & ~0x3ff);
-	//kprintf("st:%x\n", t);
 	/* do reverse lookup to get virtual address */
 	t = (uint32*)kvmm2_revget((uintptr)t, 0);
-	//kprintf("st-rev:%x\n", t);
-	/* get index into subtable, then drop flags off end of entry */
+	
+	/* make sure 4K page is actually mapped here... */
+	if ((t[(v >> 12) & 0xff] & 0x3) != TLB_C_SMALLPAGE) {
+		return 0;
+	}
 	/* 
 		also keep lower 12 bits of v address because we assume
 		that they want the physical address not the actual physical
 		page address
 	*/
-	//kprintf("t[(v >> 12) & 0xff]:%x\n", t[(v >> 12) & 0xff]);
 	*o = (t[(v >> 12) & 0xff] & ~0xfff) | (v & 0xfff); 
 	//kprintf("exit\n");
 	return 1;
@@ -408,6 +409,8 @@ int kvmm2_allocregion(KVMMTABLE *vmm, uintptr pcnt, uintptr low, uintptr high, u
 		high = low + pcnt * 0x1000;
 	}
 	
+	low = low & ~0xFFF;
+	
 	if (flags & KVMM2_ALLOCREGION_NOFIND) {
 		/* 
 			this happens when we know were we want to map something, but
@@ -428,6 +431,7 @@ int kvmm2_allocregion(KVMMTABLE *vmm, uintptr pcnt, uintptr low, uintptr high, u
 		if (flags & KVMM2_ALLOCREGION_NOFIND) {
 			if (kvmm2_getphy(vmm, out[0] + x * 0x1000, &phy)) {
 				/* okay its already been allocated and mapped */
+				kprintf("   already mapped v:%x p:%x\n", out[0] + x * 0x1000, phy);
 				continue;
 			}
 		}
@@ -606,11 +610,14 @@ int kvmm2_mapmulti(KVMMTABLE *vmm, uintptr v, uintptr p, uintptr c, uint32 flags
 	uintptr			x;
 	int				ret;
 	
+	katomic_ccenter(&vmm->lock);
+	
 	for (x = 0; x < c; ++x) {
 		/*kprintf("multi v:%x p:%x\n", v + 0x1000 * x, p + 0x1000 * x);*/
 		ret = kvmm2_mapsingle(vmm, v + 0x1000 * x, p + 0x1000 * x, flags);  
 		if (!ret) {
 			PANIC("mapmulti-failed");
+			katomic_ccexit(&vmm->lock);
 			return 0;
 		}
 	}
@@ -645,6 +652,11 @@ int kvmm2_init(KVMMTABLE *t) {
 	 
 	ks = (KSTATE*)KSTATEADDR;
 	
+	katomic_ccenter(&t->lock);
+	
+	/* just to be safe.. lets force lock it */
+	((KVMMTABLE volatile*)t)->lock = ~0;
+	
 	t->table = (uint32*)k_heapBMAllocBound(&ks->hphy, 4096 * 4, 14);
 	
 	if (!ks->vmm.table) {
@@ -671,7 +683,10 @@ int kvmm2_init(KVMMTABLE *t) {
 	for (x = 0; x < 4096; ++x) {
 		t->table[x] = 0;
 	}
-
+	
+	/* unlock */
+	t->lock = 0;
+	
 	return 1;
 }
 
