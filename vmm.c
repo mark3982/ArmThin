@@ -718,8 +718,14 @@ int kvmm2_baseinit() {
 
 	ks->vmm_ucte = 0;
 	
+	kprintf("CHECK:%x\n", ks);
+	
 	/* initialize kernel page table */
 	ks->vmm.table = (uint32*)k_heapBMAllocBound(&ks->hphy, 4096 * 4, 14);
+	
+	if (!ks->vmm.table) {
+		PANIC("FAILED-TO-ALLOC-TABLE");
+	}
 	
 	for (x = 0; x < 4096; ++x) {
 		ks->vmm.table[x] = 0;
@@ -727,7 +733,7 @@ int kvmm2_baseinit() {
 	
 	/* initialize reverse map table */
 	kvmm2_init_revtable();
-
+	
 	/* initial table stack*/
 	kstack_init(&ks->tstack);
 	

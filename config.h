@@ -9,7 +9,6 @@
 #define KSTACKEXC   		0x3000		/* descending */
 /* somewhere to place the kernel state structure */
 #define KSTARTSTATEADDR		0x3000
-#define KMAXCPU				0xf
 /* 
 	RAM is assumed to start at 0x0, but we have to leave room for a little setup code, and
 	depending on how much physical memory (KRAMSIZE) we are using we might have to adjust
