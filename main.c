@@ -404,7 +404,8 @@ int kprocfree(KPROCESS *proc) {
 	return 1;
 }
 
-void __attribute__((optimize("O0"))) k_exphandler(uint32 lr, uint32 type) {
+//__attribute__((optimize("O0")))
+void __attribute__ ((noinline)) k_exphandler(uint32 lr, uint32 type) {
 	uint32 volatile	*t0mmio;
 	uint8 volatile	*picmmio;
 	uint32			swi;
@@ -622,12 +623,12 @@ void __attribute__((optimize("O0"))) k_exphandler(uint32 lr, uint32 type) {
 	return;
 }
 	
-void __attribute__((naked)) k_exphandler_irq_entry() { KEXP_TOP3; k_exphandler(lr, ARM4_XRQ_IRQ); KEXP_BOT3; }
-void __attribute__((naked)) k_exphandler_fiq_entry() { KEXP_TOP3;  k_exphandler(lr, ARM4_XRQ_FIQ); KEXP_BOT3; }
-void __attribute__((naked)) k_exphandler_reset_entry() { KEXP_TOP3; k_exphandler(lr, ARM4_XRQ_RESET); KEXP_BOT3; }
-void __attribute__((naked)) k_exphandler_undef_entry() { KEXP_TOP3; k_exphandler(lr, ARM4_XRQ_UNDEF); KEXP_BOT3; }	
-void __attribute__((naked)) k_exphandler_abrtp_entry() { KEXP_TOP3; k_exphandler(lr, ARM4_XRQ_ABRTP); KEXP_BOT3; }
-void __attribute__((naked)) k_exphandler_abrtd_entry() { KEXP_TOP3; k_exphandler(lr, ARM4_XRQ_ABRTD); KEXP_BOT3; }
+void __attribute__((naked)) k_exphandler_irq_entry() { KEXP_TOP3(ARM4_XRQ_IRQ); }
+void __attribute__((naked)) k_exphandler_fiq_entry() { KEXP_TOP3(ARM4_XRQ_FIQ); }
+void __attribute__((naked)) k_exphandler_reset_entry() { KEXP_TOP3(ARM4_XRQ_RESET); }
+void __attribute__((naked)) k_exphandler_undef_entry() { KEXP_TOP3(ARM4_XRQ_UNDEF); }	
+void __attribute__((naked)) k_exphandler_abrtp_entry() { KEXP_TOP3(ARM4_XRQ_ABRTP); }
+void __attribute__((naked)) k_exphandler_abrtd_entry() { KEXP_TOP3(ARM4_XRQ_ABRTD); }
 void __attribute__((naked)) k_exphandler_swi_entry() { KEXP_TOPSWI; k_exphandler(lr, ARM4_XRQ_SWINT); KEXP_BOTSWI; }
 
 void arm4_xrqinstall(uint32 ndx, void *addr) {

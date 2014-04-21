@@ -77,21 +77,22 @@
 	asm("pop {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12}"); \
 	asm("LDM sp!, {pc}^")
 		 
-#define KEXP_TOP3(type) \
-	uint32			lr; \
-	asm("mov sp, %[ps]" : : [ps]"i" (KSTACKEXC)); \
-	asm("sub lr, lr, #4"); \
-	asm("push {lr}"); \
-	asm("push {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12}"); \
-	asm("mrs r0, spsr"); \
-	asm("push {r0}"); \
-	asm("mov %[ps], lr" : [ps]"=r" (lr));
-	
-#define KEXP_BOT3 \
-	asm("pop {r0}"); \
-	asm("msr spsr, r0"); \
-	asm("pop {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12}"); \
-	asm("LDM sp!, {pc}^")
+#define KEXP_TOP3(TYPE) \
+	asm( \
+	"mov sp, %[ps]\n" \
+	"sub lr, lr, #4\n" \
+	"push {lr}\n" \
+	"push {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12}\n" \
+	"mrs r0, spsr\n" \
+	"push {r0}\n" \
+	"mov r0, lr\n" \
+	"mov r1, %[type]\n" \
+	"bl k_exphandler\n" \
+	"pop {r0}\n" \
+	"msr spsr, r0\n" \
+	"pop {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12}\n" \
+	"LDM sp!, {pc}^\n" \
+	: : [ps]"i" (KSTACKEXC), [type]"i" (TYPE));
 
 #define KSWI_WAKEUP				100
 #define KSWI_SLEEP				101
