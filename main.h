@@ -77,7 +77,7 @@
 	asm("pop {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12}"); \
 	asm("LDM sp!, {pc}^")
 		 
-#define KEXP_TOP3 \
+#define KEXP_TOP3(type) \
 	uint32			lr; \
 	asm("mov sp, %[ps]" : : [ps]"i" (KSTACKEXC)); \
 	asm("sub lr, lr, #4"); \

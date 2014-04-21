@@ -9,6 +9,9 @@ SECTIONS
 	
     . = 0x10000;
 	_BOI = .;
-    .text : { *(.text*) *(.rodata*) *(.data*) *(.bss*)}
+    .text : { 
+				*(.boot*)
+				*(.text*) *(.rodata*) *(.data*) *(.bss*)
+	}
 	_EOI = .;
 }

@@ -24,9 +24,9 @@ void start(void);
     first file used in the linking process (according to alphanumerical ordering) this code will start at the
     beginning of the .text section.
 */
-void __attribute__((naked)) entry() {
+void __attribute__((naked)) __attribute__((section(".boot"))) entry() {
 	/* branch to board code */
-	asm("b boardEntry");
+	asm volatile ("b boardEntry");
 }
 
 /* small chunk memory alloc/free */
@@ -131,20 +131,12 @@ void arm4_tlbsetdom(uint32 val) {
 
 uint32 arm4_tlbgetctrl() {
 	uint32			ctrl;
-	asm("mrc p15, 0, r0, c1, c0, 0 \n\
-	     mov %[ctrl], r0" : [ctrl]"=r" (ctrl));
+	asm("mrc p15, 0, %[ctrl], c1, c0, 0" : [ctrl]"=r" (ctrl));
 	return ctrl;
 }
 
 void arm4_tlbsetctrl(uint32 ctrl) {
 	asm("mcr p15, 0, %[ctrl], c1, c0, 0" : : [ctrl]"r" (ctrl));
-}
-
-uint32 arm4_tlbenable() {
-	asm(" \
-			mrc p15, 0, r0, c1, c0, 0  \n\
-			orr r0, r0, #0x1 \n\
-			mcr p15, 0, r0, c1, c0, 0");
 }
 
 /* physical page memory alloc/free */
@@ -220,6 +212,7 @@ void ksched() {
 	KTHREAD			*kt;
 	uint32			__lr, __sp, __spsr;
 	uintptr			page;
+	uint32			tmp0, tmp1;
 	
 	ks = GETKS();
 
@@ -244,15 +237,15 @@ void ksched() {
 	kt->r0 = ((uint32*)KSTACKEXC)[-14];
 	kt->cpsr = ((uint32*)KSTACKEXC)[-15];
 	/* switch to system mode get hidden registers then switch back */
-	asm("mrs r0, cpsr \n\
-		 mov r1, r0 \n\
-		 bic r0, r0, #0x1f \n\
-		 orr r0, r0, #0x1f \n\
-		 msr cpsr, r0 \n\
+	asm volatile ("mrs %[tmp0], cpsr \n\
+		 mov %[tmp1], %[tmp0] \n\
+		 bic %[tmp0], %[tmp0], #0x1f \n\
+		 orr %[tmp0], %[tmp0], #0x1f \n\
+		 msr cpsr, %[tmp0] \n\
 		 mov %[sp], sp \n\
 		 mov %[lr], lr \n\
-		 msr cpsr, r1 \n\
-		 " : [sp]"=r" (__sp), [lr]"=r" (__lr));
+		 msr cpsr, %[tmp1] \n\
+		 " : [tmp0]"+r" (tmp0), [tmp1]"+r" (tmp1), [sp]"=r" (__sp), [lr]"=r" (__lr));
 	kt->sp = __sp;
 	kt->lr = __lr;
 	
@@ -323,15 +316,15 @@ void ksched() {
 	((uint32*)KSTACKEXC)[-14] = kt->r0;
 	((uint32*)KSTACKEXC)[-15] = kt->cpsr;
 	/* switch into system mode restore hidden registers then switch back */
-	asm("mrs r0, cpsr \n\
-		 mov r1, r0 \n\
-		 bic r0, r0, #0x1f \n\
-		 orr r0, r0, #0x1f \n\
-		 msr cpsr, r0 \n\
+	asm volatile ("mrs %[tmp0], cpsr \n\
+		 mov %[tmp1], %[tmp0] \n\
+		 bic %[tmp0], %[tmp0], #0x1f \n\
+		 orr %[tmp0], %[tmp0], #0x1f \n\
+		 msr cpsr, %[tmp0] \n\
 		 mov sp, %[sp] \n\
 		 mov lr, %[lr] \n\
-		 msr cpsr, r1 \n\
-		 " : : [sp]"r" (kt->sp), [lr]"r" (kt->lr));
+		 msr cpsr, %[tmp1] \n\
+		 " : [tmp0]"+r" (tmp0), [tmp1]"+r" (tmp1) : [sp]"r" (kt->sp), [lr]"r" (kt->lr));
 	/* set TLB table for user space (it can be zero for kernel) */
 	kvmm2_getphy(&ks->vmm, (uintptr)ks->cproc->vmm.table, &page);
 	arm4_tlbset1(page);
@@ -411,10 +404,9 @@ int kprocfree(KPROCESS *proc) {
 	return 1;
 }
 
-
-void k_exphandler(uint32 lr, uint32 type) {
-	uint32			*t0mmio;
-	uint8			*picmmio;
+void __attribute__((optimize("O0"))) k_exphandler(uint32 lr, uint32 type) {
+	uint32 volatile	*t0mmio;
+	uint8 volatile	*picmmio;
 	uint32			swi;
 	KSTATE			*ks;
 	int				x;
@@ -598,8 +590,8 @@ void k_exphandler(uint32 lr, uint32 type) {
 		
 		tmp = ks->cthread;
 		
-		kprintf("!EXCEPTION\n");
-		kprintf("CPU:%x type:%x cproc:%x cthread:%x lr:%x dbgname:%s\n", cpu, type, ks->cproc, ks->cthread, lr, ks->cthread->dbgname);
+		kprintf("!EXCEPTION type:%x ks:%x cpu:%x ks->cthread:%x\n", type, ks, cpu, ks->cthread);
+		kprintf("CPU:%x type:%x cproc:%x cthread:%x lr:%x dbgname:%s\n", cpu, type, ks->cproc, ks->cthread, lr, ks->cthread ? ks->cthread->dbgname : "$none$");
 
 		asm("mrs r0, cpsr \n\
 			 mov r1, r0 \n\
@@ -636,7 +628,7 @@ void __attribute__((naked)) k_exphandler_reset_entry() { KEXP_TOP3; k_exphandler
 void __attribute__((naked)) k_exphandler_undef_entry() { KEXP_TOP3; k_exphandler(lr, ARM4_XRQ_UNDEF); KEXP_BOT3; }	
 void __attribute__((naked)) k_exphandler_abrtp_entry() { KEXP_TOP3; k_exphandler(lr, ARM4_XRQ_ABRTP); KEXP_BOT3; }
 void __attribute__((naked)) k_exphandler_abrtd_entry() { KEXP_TOP3; k_exphandler(lr, ARM4_XRQ_ABRTD); KEXP_BOT3; }
-void __attribute__((naked)) k_exphandler_swi_entry() { KEXP_TOPSWI;   k_exphandler(lr, ARM4_XRQ_SWINT); KEXP_BOTSWI; }
+void __attribute__((naked)) k_exphandler_swi_entry() { KEXP_TOPSWI; k_exphandler(lr, ARM4_XRQ_SWINT); KEXP_BOTSWI; }
 
 void arm4_xrqinstall(uint32 ndx, void *addr) {
 	char buf[32];
@@ -685,14 +677,16 @@ typedef struct {
 } ELF32_SHDR;
 
 void memset(void *p, uint8 v, uintptr sz) {
-	uint8			*_p;
-	uintptr			x;
+	uint8 volatile		*_p;
+	uintptr				x;
 	
 	_p = (uint8*)p;
 	
 	for (x = 0; x < sz; ++x) {
 		_p[x] = v;
 	}
+	
+	return;
 }
 
 KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
@@ -844,11 +838,13 @@ KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 
 int ksleep(uint32 timeout) {
 	int			result;
-	
-	asm("	mov r0, %[in] \n\
-			swi #101 \n\
-			mov %[result], r0 \n\
-		" : [result]"=r" (result) : [in]"r" (timeout));
+	asm volatile (
+				"push {r0}\n"
+				"mov r0, %[in] \n"
+				"swi #101 \n"
+				"mov %[result], r0 \n"
+				"pop {r0}\n"
+				: [result]"=r" (result) : [in]"r" (timeout));
 	/* convert from ticks */
 	return result;
 }
@@ -969,6 +965,8 @@ void start() {
 
 	/* system specific initialization (currently included with board module) */
 	systemPreInitialization();
+
+	kprintf("@@@\n");
 	
 	ks = GETKS();
 	
@@ -997,7 +995,7 @@ void start() {
 	//arm4_tlbsetctrl(arm4_tlbgetctrl() | 0x1 | (1 << 23));
 	kprintf("\ntblctrl:%x\n", arm4_tlbgetctrl());
 	arm4_tlbsetctrl(arm4_tlbgetctrl() | 0x1);
-	kprintf("tblctrl:%x\n", arm4_tlbgetctrl());
+	kprintf("\ntblctrl:%x\n", arm4_tlbgetctrl());
 	
 	/* testing something GCC specific (built-in atomic locking) */
 	//while (__sync_val_compare_and_swap(&lock, 0, 1));

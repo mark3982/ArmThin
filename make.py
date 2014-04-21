@@ -108,7 +108,7 @@ def makeKernel(cfg, dir, out, bobjs):
 	objs = ' '.join(objs)
 	bobjs = ' '.join(bobjs)
 	
-	tmp = out
+	tmp = '__armos.bin'
 	# link it
 	# %s/libgcc.a
 	#  cfg['LIBGCCPATH'],
@@ -182,7 +182,7 @@ cfg['CC'] = 'arm-eabi-gcc'
 cfg['LD'] = 'arm-eabi-ld'
 cfg['AR'] = 'arm-eabi-ar'
 cfg['OBJCOPY'] = 'arm-eabi-objcopy'
-cfg['CCFLAGS'] = '-mcpu=cortex-a9 -fno-builtin-printf -fno-builtin-sprintf -fno-builtin-memset'
+cfg['CCFLAGS'] = '-save-temps -save-temps=cwd -O3 -mcpu=cortex-a9 -fno-builtin-printf -fno-builtin-sprintf -fno-builtin-memset'
 cfg['hdrpaths'] = ['../../']
 cfg['dirofboards'] = './boards'
 cfg['dirofmodules'] = './modules'

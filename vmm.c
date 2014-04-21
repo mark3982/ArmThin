@@ -576,9 +576,9 @@ int kvmm2_walkentries(KVMMTABLE *vmm, KVMM2_WALKCB cb) {
 }
 
 int kvmm2_unmap(KVMMTABLE *vmm, uintptr v, uint8 free) {
-	uintptr			phy;
-	uint32			*t, *st;
-	KSTATE			*ks;
+	uintptr				phy;
+	uint32 volatile		*t, *st;
+	KSTATE				*ks;
 	
 	ks = GETKS();
 	
@@ -613,7 +613,7 @@ int kvmm2_mapmulti(KVMMTABLE *vmm, uintptr v, uintptr p, uintptr c, uint32 flags
 	katomic_ccenter(&vmm->lock);
 	
 	for (x = 0; x < c; ++x) {
-		/*kprintf("multi v:%x p:%x\n", v + 0x1000 * x, p + 0x1000 * x);*/
+		kprintf("multi v:%x p:%x\n", v + 0x1000 * x, p + 0x1000 * x);
 		ret = kvmm2_mapsingle(vmm, v + 0x1000 * x, p + 0x1000 * x, flags);  
 		if (!ret) {
 			PANIC("mapmulti-failed");
@@ -622,6 +622,7 @@ int kvmm2_mapmulti(KVMMTABLE *vmm, uintptr v, uintptr p, uintptr c, uint32 flags
 		}
 	}
 	
+	katomic_ccexit(&vmm->lock);
 	return 1;
 }
 

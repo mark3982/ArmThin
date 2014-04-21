@@ -15,7 +15,7 @@
 	KRAMADDR to give a bit more. For example if KRAMSIZE is 4GB then KRAMADDR needs to be
 	larger than 1MB, perferrably 2MB at least.
 */
-#define KRAMADDR	0x200000
+#define KRAMADDR	0x10000
 #define KRAMSIZE	(1024 * 1024 * 8)
 /* 
 	kernel virtual memory size 

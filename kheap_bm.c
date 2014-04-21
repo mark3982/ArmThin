@@ -34,9 +34,11 @@ int k_heapBMAddBlockEx(KHEAPBM *heap, uintptr addr, uint32 size, uint32 bsize, K
 
 	bcnt = size / bsize;
 	
+	kprintf("bcnt:%x bm:%x size:%x bsize:%x\n", bcnt, bm, size, bsize);
 	/* clear bitmap */
 	for (x = 0; x < bcnt; ++x) {
 		bm[x] = 0;
+		//kprintf("&bm[x]:%x x:%x bcnt:%x\n", &bm[x], x, bcnt);
 	}
 
 	bcnt = (bcnt / bsize) * bsize < bcnt ? bcnt / bsize + 1 : bcnt / bsize;
@@ -52,7 +54,7 @@ int k_heapBMAddBlockEx(KHEAPBM *heap, uintptr addr, uint32 size, uint32 bsize, K
 	b->lfb = bcnt - 1;
 	
 	b->used = bcnt;
-	
+	kprintf("HEREZ bcnt:%x b->used:%x b->lfb:%x\n", bcnt, b->used, b->lfb);
 	return 1;
 }
 

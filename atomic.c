@@ -16,10 +16,10 @@ uint32 katomic_locktake(volatile uint32 *ptr, uint32 need_value, uint32 new_valu
 				 "   ldrex %[old_value], %[ptr]\n"
 				 "   cmp %[old_value], %[new_value]\n"
 				 "   moveq %[reloop], #0x0\n"
-				 "   beq done\n"
+				 "   beq done%=\n"
 				 "   cmp %[need_value], %[old_value]\n"
 				 "   strexeq %[reloop], %[new_value], %[ptr]\n"
-				 "   done:\n"
+				 "   done%=:\n"
 				 : [reloop]"=r"(reloop), [ptr]"+m"(*ptr), [old_value]"=r" (old_value)
 				 : [new_value]"r"(new_value), [need_value]"r"(need_value)
 				 : "cc", "memory");
