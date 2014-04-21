@@ -38,7 +38,7 @@ int kstack_push(KSTACK *stack, uint32 v) {
 	KSTACKBLOCK				*b, *_b;
 	KSTATE					*ks;
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 	
 	b = stack->cur;
 	
@@ -76,7 +76,7 @@ int kstack_init(KSTACK *stack) {
 	KSTATE					*ks;
 	uint32					x;
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 	/* paging is not likely up so we have to identity map */
 	b = (KSTACKBLOCK*)k_heapBMAllocBound(&ks->hchk, K1KPAGESTACKBSZ, 0);
 	if (!b) {
@@ -120,7 +120,7 @@ int kvmm2_revset(uintptr p, uint32 v, uint8 opt) {
 	KSTATE			*ks;
 	uint32			*t;
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 
 	/* add table to reverse map */
 	if (!ks->vmm_rev[p >> 20]) {
@@ -145,7 +145,7 @@ uintptr kvmm2_revget(uintptr p, uint8 opt) {
 	uint32			*t;
 	KSTATE			*ks;
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 	
 	if (!ks->vmm_rev[p >> 20]) {
 		kprintf("error:revget; p:%x\n", p);
@@ -223,7 +223,7 @@ int kvmm2_get1Ktable(uintptr *o, uint32 flags) {
 	uint8			latemap, latemap2;
 	uintptr			lm_ptaddr, lm_vtaddr, lm2_ptaddr, lm2_vtaddr;
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 	
 	t = ks->vmm.table;
 	latemap = 0;
@@ -349,7 +349,7 @@ int kvmm2_findregion(KVMMTABLE *vmm, uintptr tc, uintptr low, uintptr high, uint
 	uintptr			c;
 	uintptr			start;
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 	
 	/* move low up if needed onto page boundary */
 	low = low & 0xfff > 0 ? (low & ~0xfff) + 0x1000 : low & ~0xfff;
@@ -403,7 +403,7 @@ int kvmm2_allocregion(KVMMTABLE *vmm, uintptr pcnt, uintptr low, uintptr high, u
 	uintptr			phy;
 	KSTATE			*ks;
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 	
 	if (!high) {
 		high = low + pcnt * 0x1000;
@@ -465,7 +465,7 @@ int kvmm2_mapsingle(KVMMTABLE *vmm, uintptr v, uintptr p, uint32 flags) {
 	uintptr			phy;
 	uint32			x;
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 	
 	t = vmm->table;
 	
@@ -580,7 +580,7 @@ int kvmm2_unmap(KVMMTABLE *vmm, uintptr v, uint8 free) {
 	uint32			*t, *st;
 	KSTATE			*ks;
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 	
 	t = vmm->table;
 	
@@ -650,7 +650,7 @@ int kvmm2_init(KVMMTABLE *t) {
 	KSTATE			*ks;
 	uintptr			addr;
 	 
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 	
 	katomic_ccenter(&t->lock);
 	
@@ -694,7 +694,7 @@ int kvmm2_init_revtable() {
 	uint32		x;
 	KSTATE		*ks;
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 
 	ks->vmm_rev = (uint32*)k_heapBMAllocBound(&ks->hchk, 4096 * 4, 0);
 	
@@ -714,7 +714,7 @@ int kvmm2_baseinit() {
 	uint32			x;
 	char			buf[128];
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 
 	ks->vmm_ucte = 0;
 	

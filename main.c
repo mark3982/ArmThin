@@ -33,7 +33,7 @@ void __attribute__((naked)) entry() {
 void kfree(void *ptr) {
 	KSTATE			*ks;
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 
 	k_heapBMFree(&ks->hchk, ptr);
 }
@@ -43,7 +43,7 @@ void* kmalloc(uint32 size) {
 	KSTATE			*ks;
 	uint32			_size;	
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 	
 	/* attempt first allocation try (will fail on very first) */
 	ptr = k_heapBMAlloc(&ks->hchk, size);
@@ -151,14 +151,14 @@ uint32 arm4_tlbenable() {
 void* kpalloc(uint32 size) {
 	KSTATE			*ks;
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 	return k_heapBMAlloc(&ks->hphy, size);
 }
 
 void kpfree(void *ptr) {
 	KSTATE			*ks;
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 	k_heapBMFree(&ks->hphy, ptr);
 }
 
@@ -221,7 +221,7 @@ void ksched() {
 	uint32			__lr, __sp, __spsr;
 	uintptr			page;
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 
 	/*
 		1. store register on stack in thread struct
@@ -379,7 +379,7 @@ static void kprocfree__walkercb(uintptr v, uintptr p) {
 	KSTATE					*ks;
 	uint32					r0;
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 
 	/* just unmap it to zero the entry for safety */
 	kvmm2_unmap(&ks->cproc->vmm, v, 0);
@@ -424,7 +424,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 	KPROCESS		*proc;
 	KTHREAD			*th, *_th;
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 		
 	//kserdbg_putc('H');
 	//kserdbg_putc('\n');
@@ -707,7 +707,7 @@ KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	
 	kprintf("@@ loading elf into memory space\n");
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 		
 	kprintf("HERE\n");
 		
@@ -874,7 +874,7 @@ void kthread(KTHREAD *myth) {
 	uint32			tt, bytes;
 	uint32			cycle;
 	
-	ks = (KSTATE*)KSTATEADDR;
+	ks = GETKS();
 	
 	for (;;) {
 		/* check ring buffers for all threads */
@@ -964,13 +964,13 @@ void start() {
 	arm4_xrqinstall(ARM4_XRQ_IRQ, &k_exphandler_irq_entry);
 	arm4_xrqinstall(ARM4_XRQ_FIQ, &k_exphandler_fiq_entry);
 	
-	ks = (KSTATE*)KSTATEADDR;
-	
 	asm("mrc p15, 0, %[cpuid], c0, c0, 5" : [cpuid]"=r" (cpuid));
 	kprintf("cpuid:%x\n", cpuid);
 
 	/* system specific initialization (currently included with board module) */
 	systemPreInitialization();
+	
+	ks = GETKS();
 	
 	kserdbg_putc('Y');
 	
