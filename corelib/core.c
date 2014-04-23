@@ -135,9 +135,12 @@ void printf(const char *fmt, ...) {
 
 uint32 getTicksPerSecond() {
 	uint32			out;
-	asm("	swi #103 \n\
-			mov %[out], r0 \n\
-		" : [out]"=r" (out));
+	asm volatile (
+			"push {r0}\n"
+			"swi #103 \n"
+			"mov %[out], r0 \n"
+			"pop {r0}\n"
+			: [out]"=r" (out));
 	return out;
 }
 
@@ -154,13 +157,17 @@ int sleep(uint32 timeout) {
 	tps = getTicksPerSecond();
 	timeout = timeout * tps;
 	
-	asm("	mov r0, %[in] \n\
-			swi #101 \n\
-			mov %[result], r0 \n\
-		" : [result]"=r" (result) : [in]"r" (timeout));
+	printf("tps:%x\n", tps);
+	
+	asm volatile (
+			"push {r0}\n"
+			"mov r0, %[in] \n"
+			"swi #101 \n"
+			"mov %[result], r0 \n"
+			"pop {r0}\n"
+			: [result]"=r" (result) : [in]"r" (timeout));
 	/* convert from ticks */
-	//return result / tps;
-	return result;
+	return result / tps;
 }
 
 void yield() {

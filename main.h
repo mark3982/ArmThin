@@ -58,41 +58,8 @@
 #define PANIC(msg) kprintf("PANIC %s LINE %x [%s]\n", __FILE__, __LINE__, msg); stackprinter(); for (;;)
 #define ASSERTPANIC(cond, msg) if (!(cond)) { PANIC(msg); }
 
+#define GETCS() kboardGetCPUState()
 #define GETKS() kboardGetCPUState()->ks
-
-#define KEXP_TOPSWI \
-	uint32			lr; \
-	asm( \
-		"mov sp, %[excsp]\n" \
-		"push {lr}\n" \
-		"push {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12}\n" \
-		"mrs r0, spsr\n" \
-		"push {r0}\n" \
-		"mov %[lr], lr\n" \
-		: [lr]"=r" (lr) : [excsp]"i" (KSTACKEXC));
-
-#define KEXP_BOTSWI \
-	asm("pop {r0}"); \
-	asm("msr spsr, r0"); \
-	asm("pop {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12}"); \
-	asm("LDM sp!, {pc}^")
-		 
-#define KEXP_TOP3(TYPE) \
-	asm( \
-	"mov sp, %[ps]\n" \
-	"sub lr, lr, #4\n" \
-	"push {lr}\n" \
-	"push {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12}\n" \
-	"mrs r0, spsr\n" \
-	"push {r0}\n" \
-	"mov r0, lr\n" \
-	"mov r1, %[type]\n" \
-	"bl k_exphandler\n" \
-	"pop {r0}\n" \
-	"msr spsr, r0\n" \
-	"pop {r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12}\n" \
-	"LDM sp!, {pc}^\n" \
-	: : [ps]"i" (KSTACKEXC), [type]"i" (TYPE));
 
 #define KSWI_WAKEUP				100
 #define KSWI_SLEEP				101
@@ -108,6 +75,8 @@
 #define KTHREAD_WAKEUP			0x2
 #define KTHREAD_KIDLE			0x4
 	
+struct _KPROCESS;
+	
 typedef struct _KTHREAD {
 	struct _KTHREAD		*next;
 	struct _KTHREAD		*prev;
@@ -122,8 +91,10 @@ typedef struct _KTHREAD {
 	RB					*utx;			/* thread space address */
 	
 	/* thread control */
-	uint64				timeout;			/* when to wakeup */
+	uint32				timeout;			/* when to wakeup */
 	uint8				flags;
+	
+	struct _KPROCESS	*proc;
 	
 	/* thread register state */
 	uint32				r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, sp, lr, cpsr, pc;
@@ -140,13 +111,15 @@ typedef struct _KPROCESS {
 typedef struct _KSTATE {
 	/* new process/thread support */
 	KPROCESS					*procs;
-	KPROCESS					*cproc;
-	KTHREAD						*cthread;
 	KTHREAD						*idleth;
 	KPROCESS					*idleproc;
+	uint32						schedlock;
+	KSTACK						runnable;
 	
 	/* restart catch (or another cpu starting) */
 	uint32						rescatch;
+	
+	uint32						holdcpus;
 	
 	/* board state */
 	void						*bif;
@@ -173,6 +146,9 @@ typedef struct _KSTATE {
 typedef struct _KCPUSTATE {
 	uintptr			excstack;
 	KSTATE			*ks;
+	KPROCESS		*cproc;
+	KTHREAD			*cthread;
+	uint32			ptirq;
 } KCPUSTATE;
 
 void stackprinter();

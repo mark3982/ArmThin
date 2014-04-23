@@ -436,12 +436,12 @@ int kvmm2_allocregion(KVMMTABLE *vmm, uintptr pcnt, uintptr low, uintptr high, u
 			}
 		}
 		p = (uintptr)k_heapBMAllocBound(&ks->hphy, 0x1000, 12);
-		/* increment reference count */
-		kvmm2_revinc(p);
 		if (!p) {
 			PANIC("heap-alloc-failed");
 			return 0;
 		}
+		/* increment reference count */
+		kvmm2_revinc(p);
 
 		if (!kvmm2_mapsingle(vmm, out[0] + x * 0x1000, p, flags)) {
 			PANIC("map-single-failed");

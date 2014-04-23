@@ -47,8 +47,8 @@
 #define KVIRPAGESIZE		4096
 /* the block size of the chunk heap (kmalloc, kfree) */
 #define KCHKHEAPBSIZE		16
-/* minimum block size for chunk heap */
-#define KCHKMINBLOCKSZ		(1024 * 1024)
+/* minimum block size for chunk heap (physical page count!) */
+#define KCHKMINBLOCKSZ		5
 /* block size for 1K page stack */
 #define K1KPAGESTACKBSZ		1024
 /* max number of ticks for a task */

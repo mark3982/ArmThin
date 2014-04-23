@@ -80,7 +80,7 @@ def makeModule(cfg, dir, out):
 	# the -N switch has to prevent the file_offset in the elf32 from being
 	# equal to the VMA address which was bloating the modules way too much
 	# now they should be aligned to a 4K boundary or something similar
-	if executecmd(dir, '%s -T ../../module.link -N -o ../%s.mod ../../corelib/core.o ../../corelib/rb.o %s' % (cfg['LD'], out, objs), cmdshow=cfg['cmdshow']) is False:
+	if executecmd(dir, '%s -T ../../module.link -L%s -N -o ../%s.mod ../../corelib/core.o ../../corelib/rb.o %s -lgcc' % (cfg['LD'], cfg['LIBGCCPATH'], out, objs), cmdshow=cfg['cmdshow']) is False:
 		return False
 	#if executecmd(dir, '%s -S ../%s.mod ../%s.mod' % (cfg['OBJCOPY'], out, out), cmdshow=cfg['cmdshow']) is False:
 	#	return False
@@ -111,7 +111,7 @@ def makeKernel(cfg, dir, out, bobjs):
 	tmp = '__armos.bin'
 	# link it
 	# %s/libgcc.a
-	#  cfg['LIBGCCPATH'],
+	#  cfg['LIBGCCPATH'],-L%s
 	if executecmd(dir, '%s -T link.ld -o %s main.o -L%s ./corelib/rb.o %s %s -lgcc' % (cfg['LD'], tmp, cfg['LIBGCCPATH'], objs, bobjs), cmdshow=cfg['cmdshow']) is False:
 		return False
 	# strip it
