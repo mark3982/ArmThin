@@ -136,10 +136,8 @@ void printf(const char *fmt, ...) {
 uint32 getTicksPerSecond() {
 	uint32			out;
 	asm volatile (
-			"push {r0}\n"
 			"swi #103 \n"
 			"mov %[out], r0 \n"
-			"pop {r0}\n"
 			: [out]"=r" (out));
 	return out;
 }
@@ -149,6 +147,19 @@ uint32 getTicksPerSecond() {
 	      call that does both and takes second as an argument. At the moment I am just wanting to keep the kernel
 		  minimal and leave optimization for later on down the road if needed.
 */
+
+uint32 __sleep(uint32 timeout) {
+	uint32			result;
+	asm volatile (
+			"push {r0}\n"
+			"mov r0, %[in] \n"
+			"swi #101 \n"
+			"mov %[result], r0 \n"
+			"pop {r0}\n"
+			: [result]"=r" (result) : [in]"r" (timeout));
+	return result;
+}
+
 int sleep(uint32 timeout) {
 	int			result;
 	uint32		tps;
@@ -159,13 +170,7 @@ int sleep(uint32 timeout) {
 	
 	printf("tps:%x\n", tps);
 	
-	asm volatile (
-			"push {r0}\n"
-			"mov r0, %[in] \n"
-			"swi #101 \n"
-			"mov %[result], r0 \n"
-			"pop {r0}\n"
-			: [result]"=r" (result) : [in]"r" (timeout));
+	result = __sleep(timeout);
 	/* convert from ticks */
 	return result / tps;
 }
@@ -226,6 +231,7 @@ void _start(uint32 rxaddr, uint32 txaddr, uint32 txrxsz) {
 	__corelib_tx.sz = txrxsz;
 	__corelib_tx.rb = (RB*)txaddr;
 	
+	printf("okokok\n");
 	/* wait to read arguments from ring buffer */
 	//rb_read_bio(&__corelib_rx, 
 	

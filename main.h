@@ -93,6 +93,7 @@ typedef struct _KTHREAD {
 	/* thread control */
 	uint32				timeout;			/* when to wakeup */
 	uint8				flags;
+	uint32				locked;				/* locked */
 	
 	struct _KPROCESS	*proc;
 	

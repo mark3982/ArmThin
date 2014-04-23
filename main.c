@@ -280,6 +280,7 @@ void ksched() {
 			 " : [tmp0]"+r" (tmp0), [tmp1]"+r" (tmp1), [sp]"=r" (__sp), [lr]"=r" (__lr));
 		kt->sp = __sp;
 		kt->lr = __lr;
+		kt->locked = 0;			/* unlock thread so other cpus can grab it */
 	}
 
 	/* build runnable stack if needed */
@@ -291,6 +292,9 @@ void ksched() {
 				if (th->flags & KTHREAD_KIDLE) {
 					continue;
 				}				
+				if (th->locked) {
+					continue;
+				}
 				/* only wakeup if it is sleeping */
 				if (th->flags & KTHREAD_SLEEPING) {
 					if (th->timeout > 0 && (ks->ctime > th->timeout)) {
@@ -366,6 +370,7 @@ void ksched() {
 	/* set TLB table for user space (it can be zero for kernel) */
 	kvmm2_getphy(&ks->vmm, (uintptr)kt->proc->vmm.table, &page);
 	arm4_tlbset1(page);
+	kt->locked = 1;			/* lock so no other cpu tries to run it */
 	/* 
 		Invalidate all unlocked entries...
 		
@@ -377,7 +382,7 @@ void ksched() {
 	*/
 	asm("mcr p15, #0, r0, c8, c7, #0");
 	
-	kprintf("SWITCH-TO thread:%x cpsr:%x fp:%x sp:%x pc:%x dbgname:%s\n", kt, kt->cpsr, kt->r11, kt->sp, kt->pc, kt->dbgname);
+	//kprintf("SWITCH-TO thread:%x cpsr:%x fp:%x sp:%x pc:%x dbgname:%s\n", kt, kt->cpsr, kt->r11, kt->sp, kt->pc, kt->dbgname);
 	
 	uint32			*p;
 	
@@ -469,12 +474,12 @@ void k_exphandler(uint32 lr, uint32 type) {
 
 	stk = (uint32*)cs->excstack;	
 	
-	kprintf("@@@@@@@@@@@@@@@@@@@:%x\n", ks->hphy.fblock->size);
+	//kprintf("@@@@@@@@@@@@@@@@@@@:%x\n", ks->hphy.fblock->size);
 	//kserdbg_putc('H');
 	//kserdbg_putc('\n');
 	
-	asm("mov %[var], sp\n" : [var]"=r" (r0));
-	kprintf("SPSPSPSP:%x type:%x\n", r0, type);
+	//asm("mov %[var], sp\n" : [var]"=r" (r0));
+	//kprintf("SPSPSPSP:%x type:%x\n", r0, type);
 	
 	if (type == ARM4_XRQ_IRQ) {
 		if (kboardCheckAndClearTimerINT()) {			
@@ -482,10 +487,10 @@ void k_exphandler(uint32 lr, uint32 type) {
 			r0 = kboardGetTimerTick();
 			ks->ctime += r0;
 			//kprintf("delta:%x ks->ctime:%x ks:%x\n", r0, ks->ctime, ks);
-			kprintf("IRQ: ctime:%x timer-tick:%x\n", ks->ctime, kboardGetTimerTick());
-			kprintf(" . ... ENTRY\n");
+			//kprintf("IRQ: ctime:%x timer-tick:%x\n", ks->ctime, kboardGetTimerTick());
+			//kprintf(" . ... ENTRY\n");
 			ksched();
-			kprintf(" . ... EXIT\n");
+			//kprintf(" . ... EXIT\n");
 			/* go back through normal interrupt return process */
 			return;
 		}
@@ -647,7 +652,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 		
 		tmp = cs->cthread;
 		
-		//for (;;) {
+		for (;;) {
 			r0 = stk[-1];
 			for (x = 0; x < 0xffffff; ++x);
 			kprintf("!EXCEPTION pc:%x type:%x ks:%x cpu:%x ks->cthread:%x\n", r0, type, ks, cpu, cs->cthread);
@@ -670,7 +675,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 			kprintf("inst:%x\n", r0);
 			
 			for (;;);
-		//}
+		}
 		for (;;);
 		if (lr >= (uintptr)&_BOI && lr <= (uintptr)&_EOI) {
 			PANIC("CRITICAL FAILURE: exception in kernel image\n");
@@ -1097,6 +1102,7 @@ void start() {
 		create a task for any attached modules of the correct type
 	*/
 
+	x = 0;
 	kprintf("looking at attached modules\n");
 	for (m = kPkgGetFirstMod(); m; m = kPkgGetNextMod(m)) {
 		kprintf("looking at module\n");
@@ -1107,7 +1113,18 @@ void start() {
 			ll_add((void**)&ks->procs, process);
 			/* will create thread in process */
 			th = kelfload(process, (uintptr)&m->slot[0], m->size);
-			th->dbgname = "USERMODULE";
+			switch (x) {
+				case 0:
+					th->dbgname = "USERMODULE1";
+					break;
+				case 1:
+					th->dbgname = "USERMODULE2";
+					break;
+				default:
+					th->dbgname = "USERMODULEX";
+					break;
+			}
+			++x;
 		}
 		kprintf("looking for NEXT module..\n");
 	}
