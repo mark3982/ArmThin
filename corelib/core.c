@@ -136,8 +136,10 @@ void printf(const char *fmt, ...) {
 uint32 getTicksPerSecond() {
 	uint32			out;
 	asm volatile (
+			"push {r0}\n"
 			"swi #103 \n"
 			"mov %[out], r0 \n"
+			"pop {r0}\n"
 			: [out]"=r" (out));
 	return out;
 }
@@ -166,9 +168,8 @@ int sleep(uint32 timeout) {
 	
 	/* convert to ticks */
 	tps = getTicksPerSecond();
-	timeout = timeout * tps;
 	
-	printf("tps:%x\n", tps);
+	timeout = timeout * tps;
 	
 	result = __sleep(timeout);
 	/* convert from ticks */

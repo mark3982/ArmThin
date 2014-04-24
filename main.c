@@ -231,11 +231,17 @@ void ksched() {
 	ks = GETKS();
 	
 	stk = (uint32*)cs->excstack;
-	
-	katomic_ccenter(&ks->schedlock);
+
+	/* 
+		i use wfi for qemu because of the way it handles multiple cpus; if
+		i dont let it go to sleep it just sits there spinning making the
+		other cpus wait before they execute
+	*/
+	KCCENTER(&ks->schedlock);
 	if (ks->holdcpus == 1) {
 		for (;;) {
-			kprintf("WARNING\n");
+			kprintf("WARNING cpu-holding-lock:%x\n", ks->schedlock.lock);
+			for (;;);
 		}
 	}
 	
@@ -243,7 +249,7 @@ void ksched() {
 	
 	//kprintf("SCHED  ks:%x\n", ks);
 	
-	kprintf("SCHED cpu:%x ks:%x\n", boardGetCPUID(), ks);
+	//kprintf("SCHED cpu:%x ks:%x\n", boardGetCPUID(), ks);
 	
 	/* save previous thread, if any */
 	if (cs->cthread) {
@@ -298,24 +304,23 @@ void ksched() {
 				/* only wakeup if it is sleeping */
 				if (th->flags & KTHREAD_SLEEPING) {
 					if (th->timeout > 0 && (ks->ctime > th->timeout)) {
-						//kprintf("WOKE UP (timeout) %x %x\n", ks->cthread, ks->cthread->timeout);
+						//kprintf("WOKE UP (timeout) %x %x\n", cs->cthread, cs->cthread->timeout);
 						/* wake up thread if passed timeout */
 						th->flags &= ~KTHREAD_SLEEPING;
 						th->r0 = 0;
 					}
 					
-					if (th->timeout > 0) {
-						kprintf("SCHED ks:%x tt:%x ct:%x\n", ks, th->timeout, ks->ctime);
-						kprintf("THREAD:%s TT:%x REM-SLEEP:%x CT:%x KS:%x\n", th->dbgname, th->timeout, th->timeout - ks->ctime, ks->ctime, ks);
-					}
-					
 					/* wakeup thread is set to be woken up */
 					if (th->flags & KTHREAD_WAKEUP) {
-						//kprintf("WOKE UP (signal) %x\n", ks->cthread);
+						//kprintf("WOKE UP (signal) %x\n", cs->cthread);
 						th->flags &= ~(KTHREAD_WAKEUP | KTHREAD_SLEEPING);
 						th->r0 = ks->ctime - th->timeout;
 					}
 				}
+				
+				//if (th->flags & KTHREAD_SLEEPING) {
+					//kprintf("SLEEPING timeleft:%x timeout:%x ctime:%x name:%s\n", th->timeout - ks->ctime, th->timeout, ks->ctime, th->dbgname ? th->dbgname : "unknown");
+				//}
 				
 				/* if NOT sleeping  */
 				if (!(th->flags & KTHREAD_SLEEPING)) {
@@ -334,7 +339,7 @@ void ksched() {
 	
 	kstack_pop(&ks->runnable, (uintptr*)&cs->cthread);
 	cs->cproc = cs->cthread->proc;
-	kprintf("---------------------------------POPPING THREAD %x %s\n", cs->cproc, cs->cthread->dbgname);
+	//kprintf("---------------------------------POPPING THREAD %x %s\n", cs->cproc, cs->cthread->dbgname);
 	
 	/* hopefully we got something or the system should deadlock */
 	kt = cs->cthread;
@@ -384,17 +389,17 @@ void ksched() {
 	
 	//kprintf("SWITCH-TO thread:%x cpsr:%x fp:%x sp:%x pc:%x dbgname:%s\n", kt, kt->cpsr, kt->r11, kt->sp, kt->pc, kt->dbgname);
 	
-	uint32			*p;
+	//uint32			*p;
 	
-	if (!kvmm2_getphy(&cs->cproc->vmm, 0x90000000, (uintptr*)&p)) {
+	//if (!kvmm2_getphy(&cs->cproc->vmm, 0x90000000, (uintptr*)&p)) {
 		//kprintf("NO STACK EXISTS??\n");
-	} else {
+	//} else {
 		//kprintf("writing to stack..%x\n", kt->sp);
 		//((uint32*)kt->sp)[-1] = 0xbb;
-	}
+	//}
 	
-	if (kvmm2_getphy(&cs->cproc->vmm, 0x80000000, (uintptr*)&p)) {
-		uint32			x;
+	//if (kvmm2_getphy(&cs->cproc->vmm, 0x80000000, (uintptr*)&p)) {
+	//	uint32			x;
 		
 		//kprintf("CODE PAGE :%x\n", p);
 		
@@ -406,13 +411,13 @@ void ksched() {
 		//	p[x] = 0xeafffffe;
 		//}
 	
-	} else {
+	//} else {
 		//kprintf("CODE PAGE????\n");
-	}
+	//}
 	
 	ks->holdcpus = 0;
 	
-	katomic_ccexit(&ks->schedlock);
+	KCCEXIT(&ks->schedlock);
 }
 
 static void kprocfree__walkercb(uintptr v, uintptr p) {
@@ -511,6 +516,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 			case KSWI_TERMPROCESS:
 				/* unlink process and threads, but keep modify pointer so
 				   scheduler can grab next thread */
+				KCCENTER(&ks->schedlock);
 				proc = cs->cproc;
 				th = cs->cthread;
 				_th = th->next;
@@ -531,8 +537,10 @@ void k_exphandler(uint32 lr, uint32 type) {
 				}
 				/* release heap memory */
 				kfree(proc);
+				KCCEXIT(&ks->schedlock);
 				break;
 			case KSWI_TERMTHREAD:
+				KCCENTER(&ks->schedlock);
 				proc = cs->cproc;
 				th = cs->cthread;
 				/* should schedule a thread from the next process */
@@ -540,6 +548,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 				/* now unlink and free thread resources */
 				ll_rem((void**)&proc->threads, th);
 				kfree(th);
+				KCCEXIT(&ks->schedlock);
 				break;
 			case KSWI_VALLOC:
 				/* allocate range of pages and store result in R0 */
@@ -614,11 +623,11 @@ void k_exphandler(uint32 lr, uint32 type) {
 				/* thread sleep function */
 				r0 = stk[-14];
 				
-				kprintf("SLEEPING thread:%x timeout:%x flags:%x\n", cs->cthread, r0, cs->cthread->flags);
+				//kprintf("SLEEPSYSCALL thread:%x duration:%x flags:%x name:%s\n", cs->cthread, r0, cs->cthread->flags, cs->cthread->dbgname ? cs->cthread->dbgname : "<unknown>");
 
 				cs->cthread->flags |= KTHREAD_SLEEPING;
 				if (r0 != 0) {
-					kprintf("SLEEP total:%x r0:%x ks->ctime:%x\n", r0 + ks->ctime, r0, ks->ctime);
+					//kprintf("SLEEP total:%x r0:%x ks->ctime:%x\n", r0 + ks->ctime, r0, ks->ctime);
 					cs->cthread->timeout = r0 + ks->ctime;
 				} else {
 					cs->cthread->timeout = 0;
@@ -819,10 +828,10 @@ KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	/* --- MAP RING BUFFER INTO USERSPACE OF THREAD PROCESS */
 	/* find unused appropriate sized region in thread's address space */
 	kvmm2_findregion(&proc->vmm, 1, KMEMSIZE, 0, 0, &out);
-	kprintf("VIRTPAGE:%x\n", out);
+	//kprintf("VIRTPAGE:%x\n", out);
 	/* map that region to the same physical pages used in kernel server address space */
 	kvmm2_getphy(&ks->kservproc->vmm, (uintptr)th->krx.rb, &out2);
-	kprintf("PHYPAGE:%x\n", out2);
+	//kprintf("PHYPAGE:%x\n", out2);
 	kvmm2_mapsingle(&proc->vmm, out, out2, TLB_C_AP_FULLACCESS);
 	/* set userspace pointers for thread to appropriate values */
 	th->urx = (RB*)out;
@@ -1129,7 +1138,7 @@ void start() {
 		kprintf("looking for NEXT module..\n");
 	}
 	
-	kprintf("....\n");
+	//kprintf("....\n");
 		
 	kprintf("kboardPostPagingInit()\n");	
 	kboardPostPagingInit();

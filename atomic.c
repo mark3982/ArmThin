@@ -1,9 +1,12 @@
 #include "stdtypes.h"
+#include "main.h"
+#include "atomic.h"
+
 /*
-	grabbed from:
-	https://chromium.googlesource.com/chromium/src/base/+/master/atomicops_internals_arm_gcc.h
+	original code from:
+		https://chromium.googlesource.com/chromium/src/base/+/master/atomicops_internals_arm_gcc.h
 	
-	but heavily modified...
+	but modified heavily..
 */
 uint32 katomic_locktake(volatile uint32 *ptr, uint32 need_value, uint32 new_value) {
 	uint32		reloop;
@@ -12,7 +15,7 @@ uint32 katomic_locktake(volatile uint32 *ptr, uint32 need_value, uint32 new_valu
 	reloop = 1;
 	// old_value = LDREX(ptr)
 	// reloop = STREX(ptr, new_value)
-	asm(
+	asm volatile (
 				 "   ldrex %[old_value], %[ptr]\n"
 				 "   cmp %[old_value], %[new_value]\n"
 				 "   moveq %[reloop], #0x0\n"
@@ -31,15 +34,57 @@ int katomic_lockspin(volatile uint32 *ptr, uint32 id) {
 	while (!katomic_locktake(ptr, 0, id));
 }
 
+int katomic_lockspin_wfe(volatile KATOMIC_CCLOCK *ptr, uint32 id) {
+	uint32			cyclecnt;
+
+	cyclecnt = 0;
+	while (!katomic_locktake(&ptr->lock, 0, id) || ptr->lock != id) {
+		asm volatile ("wfe");
+		cyclecnt++;
+		if (cyclecnt > 200) {
+			kprintf("WHOA-THIS-LOCK-TAKING-A-LONG-TIME lock:%x id:%x myid:%x", ptr, ptr->lock, id);
+			for (;;);
+		}
+	}
+	//kprintf("ATOMIC-LOCK-AQUIRE lock:%x owner:%x myid:%x\n", ptr, ptr->lock, id);
+	ptr->cnt++;
+}
+
 /* critical cpu enter (per cpu locking) */
 void katomic_ccenter(volatile uint32 *ptr) {
 	uint32			cpuid;
+	
 	cpuid = boardGetCPUID() + 1;			/* get our cpu ID */
 	/* +1 because CPU0 is value 0 which is released value */
 	katomic_lockspin(ptr, cpuid);			/* spin until we grab the lock */
 }
 
-void katomic_ccexit(volatile uint32 *ptr) {
-	ptr[0] = 0;								/* drop the lock */
+/* critical cpu enter (per cpu locking) */
+void katomic_ccenter_wfe(volatile KATOMIC_CCLOCK *ptr) {
+	uint32			cpuid;
+	
+	cpuid = boardGetCPUID() + 1;				/* get our cpu ID */
+	/* +1 because CPU0 is value 0 which is released value */
+	katomic_lockspin_wfe(ptr, cpuid);			/* spin until we grab the lock */
+}
+
+void katomic_ccexit_sev(volatile KATOMIC_CCLOCK *ptr) {
+	uint32			cpuid;
+	
+	cpuid = boardGetCPUID() + 1;			/* get our cpu ID */
+	
+	/* a little sanity check.. do we own this lock? */
+	if (ptr->lock != cpuid) {
+		kprintf("lock:%x owner:%x this-cpu:%x\n", ptr, ptr->lock, cpuid);
+		PANIC("RELEASE-OF-UNOWNED-LOCK");
+	}
+	
+	ptr->cnt--;										/* decrement reference count */
+	
+	//kprintf("ATOMIC-LOCK-RELEASE lock:%x owner:%x\n", ptr, ptr->lock);
+	if (ptr->cnt == 0) {
+		ptr->lock = 0;								/* drop the lock */
+		asm volatile ("sev");
+	}
 }
 

@@ -2,10 +2,11 @@
 #define VMM_H
 #include "stdtypes.h"
 #include "main.h"
+#include "atomic.h"
 
 typedef struct _KVMMTABLE {
 	uint32			*table;
-	uint32			lock;		/* only one concurrent execution state at a time */
+	KATOMIC_CCLOCK	lock;		/* only one concurrent execution state at a time */
 } KVMMTABLE;
 
 typedef struct _KSTACKBLOCK {
@@ -60,7 +61,6 @@ int kvmm2_allocregionat(KVMMTABLE *vmm, uintptr pcnt, uintptr start, uint32 flag
 int kvmm2_allocregion(KVMMTABLE *vmm, uintptr pcnt, uintptr low, uintptr high, uint32 flags, uintptr *out);
 int kvmm2_findregion(KVMMTABLE *vmm, uintptr tc, uintptr low, uintptr high, uint32 flags, uintptr *out);
 int kvmm2_getphy(KVMMTABLE *vmm, uintptr v, uintptr *o);
-int kvmm2_get1Ktable(uintptr *o, uint32 flags);
 uint32 kvmm2_getucts(KVMMTABLE *vmm, uint32 *slot);
 int kvmm2_getu4k(KVMMTABLE *vmm, uintptr *o, uint32 flags);
 uintptr kvmm2_revget(uintptr p, uint8 opt);

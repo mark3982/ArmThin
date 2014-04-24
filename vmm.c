@@ -106,6 +106,7 @@ uint32 kvmm2_revinc(uintptr v) {
 
 uint32 kvmm2_revdec(uintptr v) {
 	uint32		val;
+	
 	val = kvmm2_revget(v, 1);
 	if (val == 0) {
 		return val;
@@ -121,6 +122,8 @@ int kvmm2_revset(uintptr p, uint32 v, uint8 opt) {
 	uint32			*t;
 	
 	ks = GETKS();
+	
+	KCCENTER(&ks->revlock);
 
 	/* add table to reverse map */
 	if (!ks->vmm_rev[p >> 20]) {
@@ -134,38 +137,50 @@ int kvmm2_revset(uintptr p, uint32 v, uint8 opt) {
 	if (!opt) {
 		/* keep lower and replace upper */
 		t[(p >> 10) & 0x3ff] = (t[(p >> 10) & 0x3ff] & 0x3ff) | v;
+		KCCEXIT(&ks->revlock);
 		return 1;
 	}
 	/* keep upper and replace lower */
 	t[(p >> 10) & 0x3ff] = (t[(p >> 10) & 0x3ff] & ~0x3ff) | v;
+	KCCEXIT(&ks->revlock);
 	return 1;
 }
 
 uintptr kvmm2_revget(uintptr p, uint8 opt) {
 	uint32			*t;
 	KSTATE			*ks;
+	uintptr			res;
 	
 	ks = GETKS();
+	
+	KCCENTER(&ks->revlock);
 	
 	if (!ks->vmm_rev[p >> 20]) {
 		kprintf("error:revget; p:%x\n", p);
 		PANIC("revget-no-sub-table");
+		KCCEXIT(&ks->revlock);
 		return 0;
 	}
 	
 	t = (uint32*)ks->vmm_rev[p >> 20];
 	
 	if (!opt) {
-		return t[(p >> 10) & 0x3ff] & ~0x3ff;
+		res = t[(p >> 10) & 0x3ff] & ~0x3ff;
+		KCCEXIT(&ks->revlock);
+		return res;
 	}
 
-	return t[(p >> 10) & 0x3ff] & 0x3ff;
+	res = t[(p >> 10) & 0x3ff] & 0x3ff;
+	KCCEXIT(&ks->revlock);
+	return res;
 }
 
 int kvmm2_getu4k(KVMMTABLE *vmm, uintptr *o, uint32 flags) {
 	int32			x, y;
 	uint32			*t, *st;
 	uint32			sp;
+	
+	KCCENTER(&vmm->lock);
 	
 	t = (uint32*)vmm->table;
 		
@@ -186,12 +201,13 @@ int kvmm2_getu4k(KVMMTABLE *vmm, uintptr *o, uint32 flags) {
 				if ((st[y] & 3) == 0) {
 					*o = (x << 20) | (y << 12);
 					kprintf("*o:%x\n", *o);
+					KCCEXIT(&vmm->lock);
 					return 1;
 				}
 			}
 		}
 	}
-	
+	KCCEXIT(&vmm->lock);
 	return 0;
 }
 
@@ -200,20 +216,27 @@ uint32 kvmm2_getucts(KVMMTABLE *vmm, uint32 *slot) {
 	uint32			x;
 	uint32			*t;
 	
+	KCCENTER(&vmm->lock);
+	
 	t = (uint32*)vmm->table;
 	
 	/* check 1MB coarse table entries */
 	for (x = 0; x < 4096; ++x) {
 		if ((t[x] & 3) == 0) {
 			*slot = x;
+			KCCEXIT(&vmm->lock);
 			return 1;
 		}
 	}
 	
+	KCCEXIT(&vmm->lock);
 	return 0;
 }
 
-int kvmm2_get1Ktable(uintptr *o, uint32 flags) {
+/*
+	NOT PROTECTED BY A PER-CPU LOCK
+*/
+static int kvmm2_get1Ktable(uintptr *o, uint32 flags) {
 	KSTATE			*ks;
 	uint32			*ptaddr, *vtaddr;
 	uint32			x;
@@ -317,9 +340,12 @@ int kvmm2_get1Ktable(uintptr *o, uint32 flags) {
 int kvmm2_getphy(KVMMTABLE *vmm, uintptr v, uintptr *o) {
 	uint32			*t;
 	
+	KCCENTER(&vmm->lock);
+	
 	t = vmm->table;
 	/* check not empty level one table entry */
 	if ((t[v >> 20] & 3) == 0) {
+		KCCEXIT(&vmm->lock);
 		return 0;
 	}
 	
@@ -330,6 +356,7 @@ int kvmm2_getphy(KVMMTABLE *vmm, uintptr v, uintptr *o) {
 	
 	/* make sure 4K page is actually mapped here... */
 	if ((t[(v >> 12) & 0xff] & 0x3) != TLB_C_SMALLPAGE) {
+		KCCEXIT(&vmm->lock);
 		return 0;
 	}
 	/* 
@@ -338,7 +365,7 @@ int kvmm2_getphy(KVMMTABLE *vmm, uintptr v, uintptr *o) {
 		page address
 	*/
 	*o = (t[(v >> 12) & 0xff] & ~0xfff) | (v & 0xfff); 
-	//kprintf("exit\n");
+	KCCEXIT(&vmm->lock);
 	return 1;
 }
 
@@ -348,6 +375,8 @@ int kvmm2_findregion(KVMMTABLE *vmm, uintptr tc, uintptr low, uintptr high, uint
 	uintptr			target;
 	uintptr			c;
 	uintptr			start;
+	
+	KCCENTER(&vmm->lock);
 	
 	ks = GETKS();
 	
@@ -369,6 +398,7 @@ int kvmm2_findregion(KVMMTABLE *vmm, uintptr tc, uintptr low, uintptr high, uint
 			c += 256;
 			if (c >= tc) {
 				*out = start;
+				KCCEXIT(&vmm->lock);
 				return 1;
 			}
 			/* skip */
@@ -384,6 +414,7 @@ int kvmm2_findregion(KVMMTABLE *vmm, uintptr tc, uintptr low, uintptr high, uint
 				c += 1;
 				if (c >= tc) {
 					*out = start;
+					KCCEXIT(&vmm->lock);
 					return 1;
 				}
 			} else {
@@ -393,6 +424,7 @@ int kvmm2_findregion(KVMMTABLE *vmm, uintptr tc, uintptr low, uintptr high, uint
 		}
 	}
 	PANIC("region-not-found");
+	KCCEXIT(&vmm->lock);
 	return 0;
 }
 
@@ -402,6 +434,8 @@ int kvmm2_allocregion(KVMMTABLE *vmm, uintptr pcnt, uintptr low, uintptr high, u
 	uintptr			p;
 	uintptr			phy;
 	KSTATE			*ks;
+	
+	KCCENTER(&vmm->lock);
 	
 	ks = GETKS();
 	
@@ -423,6 +457,7 @@ int kvmm2_allocregion(KVMMTABLE *vmm, uintptr pcnt, uintptr low, uintptr high, u
 	} else {
 		kprintf("find region low:%x high:%x\n", low, high);
 		if (!kvmm2_findregion(vmm, pcnt, low, high, flags, out)) {
+			KCCEXIT(&vmm->lock);
 			return 0;
 		}
 	}
@@ -438,6 +473,7 @@ int kvmm2_allocregion(KVMMTABLE *vmm, uintptr pcnt, uintptr low, uintptr high, u
 		p = (uintptr)k_heapBMAllocBound(&ks->hphy, 0x1000, 12);
 		if (!p) {
 			PANIC("heap-alloc-failed");
+			KCCEXIT(&vmm->lock);
 			return 0;
 		}
 		/* increment reference count */
@@ -445,17 +481,24 @@ int kvmm2_allocregion(KVMMTABLE *vmm, uintptr pcnt, uintptr low, uintptr high, u
 
 		if (!kvmm2_mapsingle(vmm, out[0] + x * 0x1000, p, flags)) {
 			PANIC("map-single-failed");
+			KCCEXIT(&vmm->lock);
 			return 0;
 		}
 		kprintf("mapped %x -> %x\n", out[0] + x * 0x1000, p);
 	}
 	
+	KCCEXIT(&vmm->lock);
 	return 1;
 }
 
 int kvmm2_allocregionat(KVMMTABLE *vmm, uintptr pcnt, uintptr start, uint32 flags) {
 	uintptr				tmp;
-	return kvmm2_allocregion(vmm, pcnt, start, 0, flags, &tmp);
+	int					res;
+	
+	KCCENTER(&vmm->lock);
+	res = kvmm2_allocregion(vmm, pcnt, start, 0, flags, &tmp);
+	KCCEXIT(&vmm->lock);
+	return res;
 }
 
 int kvmm2_mapsingle(KVMMTABLE *vmm, uintptr v, uintptr p, uint32 flags) {
@@ -464,6 +507,8 @@ int kvmm2_mapsingle(KVMMTABLE *vmm, uintptr v, uintptr p, uint32 flags) {
 	KSTATE			*ks;
 	uintptr			phy;
 	uint32			x;
+	
+	KCCENTER(&vmm->lock);
 	
 	ks = GETKS();
 	
@@ -518,9 +563,11 @@ int kvmm2_mapsingle(KVMMTABLE *vmm, uintptr v, uintptr p, uint32 flags) {
 		if (!(flags & KVMM_REPLACE)) {
 			if (!(flags & KVMM_SKIP)) {
 				kprintf("something already here; table:%x virtual:%x val:%x\n", st, v, st[(v>>12)&0xff]);
+				KCCEXIT(&vmm->lock);
 				return 0;
 			} else {
 				/* just skip it with no error */
+				KCCEXIT(&vmm->lock);
 				return 2;
 			}
 		}
@@ -536,6 +583,7 @@ int kvmm2_mapsingle(KVMMTABLE *vmm, uintptr v, uintptr p, uint32 flags) {
 	flags = flags & 0xfff;
 	st[(v >> 12) & 0xff] = p | flags | TLB_C_SMALLPAGE;
 	
+	KCCEXIT(&vmm->lock);
 	return 1;
 }
 
@@ -544,6 +592,8 @@ int kvmm2_walkentries(KVMMTABLE *vmm, KVMM2_WALKCB cb) {
 	uint32			*st;
 	uint32			x, y;
 	uint32			c;
+	
+	KCCENTER(&vmm->lock);
 	
 	t = vmm->table;
 	
@@ -572,6 +622,7 @@ int kvmm2_walkentries(KVMMTABLE *vmm, KVMM2_WALKCB cb) {
 		}
 	}
 	
+	KCCEXIT(&vmm->lock);
 	return c;
 }
 
@@ -580,11 +631,14 @@ int kvmm2_unmap(KVMMTABLE *vmm, uintptr v, uint8 free) {
 	uint32 volatile		*t, *st;
 	KSTATE				*ks;
 	
+	KCCENTER(&vmm->lock);
+	
 	ks = GETKS();
 	
 	t = vmm->table;
 	
 	if ((t[v >> 20] & 3) == 0) {	
+		KCCEXIT(&vmm->lock);
 		return 0;
 	}
 	
@@ -592,6 +646,7 @@ int kvmm2_unmap(KVMMTABLE *vmm, uintptr v, uint8 free) {
 	st = (uint32*)kvmm2_revget((uintptr)st, 0);
 	
 	if ((st[(v >> 12) & 0xff] & 3) == 0) {
+		KCCEXIT(&vmm->lock);
 		return 0;
 	}
 	
@@ -603,6 +658,7 @@ int kvmm2_unmap(KVMMTABLE *vmm, uintptr v, uint8 free) {
 	
 	/* unmap */
 	st[(v >> 12) & 0xff] = 0;
+	KCCEXIT(&vmm->lock);
 	return 1;
 }
 
@@ -610,19 +666,19 @@ int kvmm2_mapmulti(KVMMTABLE *vmm, uintptr v, uintptr p, uintptr c, uint32 flags
 	uintptr			x;
 	int				ret;
 	
-	katomic_ccenter(&vmm->lock);
+	KCCENTER(&vmm->lock);
 	
 	for (x = 0; x < c; ++x) {
 		kprintf("multi v:%x p:%x\n", v + 0x1000 * x, p + 0x1000 * x);
 		ret = kvmm2_mapsingle(vmm, v + 0x1000 * x, p + 0x1000 * x, flags);  
 		if (!ret) {
 			PANIC("mapmulti-failed");
-			katomic_ccexit(&vmm->lock);
+			KCCEXIT(&vmm->lock);
 			return 0;
 		}
 	}
 	
-	katomic_ccexit(&vmm->lock);
+	KCCEXIT(&vmm->lock);
 	return 1;
 }
 
@@ -653,25 +709,25 @@ int kvmm2_init(KVMMTABLE *t) {
 	 
 	ks = GETKS();
 	
-	katomic_ccenter(&t->lock);
-	
-	/* just to be safe.. lets force lock it */
-	((KVMMTABLE volatile*)t)->lock = ~0;
+	KCCENTER(&t->lock);
 	
 	t->table = (uint32*)k_heapBMAllocBound(&ks->hphy, 4096 * 4, 14);
 	
 	if (!ks->vmm.table) {
 		PANIC("vmm-table-alloc-failed");
+		KCCEXIT(&t->lock);
 		return 0;
 	}	
 	
 	if (!kvmm2_findregion(&ks->vmm, 4, 0, KMEMSIZE, 0, &addr)) {
 		PANIC("findregionfailed");
+		KCCEXIT(&t->lock);
 		return 0;
 	}
 	
 	if (!kvmm2_mapmulti(&ks->vmm, addr, (uintptr)t->table, 4, TLB_C_AP_PRIVACCESS)) {
 		PANIC("vmm-table-map-failed");
+		KCCEXIT(&t->lock);
 		return 0;
 	}
 	
@@ -686,8 +742,7 @@ int kvmm2_init(KVMMTABLE *t) {
 	}
 	
 	/* unlock */
-	t->lock = 0;
-	
+	KCCEXIT(&t->lock);
 	return 1;
 }
 

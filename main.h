@@ -6,6 +6,7 @@
 #include "kheap.h"
 #include "dbgout.h"
 #include "corelib/rb.h"
+#include "atomic.h"
 
 #define ARM4_XRQ_RESET   0x00
 #define ARM4_XRQ_UNDEF   0x01
@@ -114,7 +115,7 @@ typedef struct _KSTATE {
 	KPROCESS					*procs;
 	KTHREAD						*idleth;
 	KPROCESS					*idleproc;
-	uint32						schedlock;
+	KATOMIC_CCLOCK				schedlock;
 	KSTACK						runnable;
 	
 	/* restart catch (or another cpu starting) */
@@ -142,6 +143,7 @@ typedef struct _KSTATE {
 	uint32			vmm_ucte;		/* unused coarse table entries */
 	KSTACK			tstack;			/* 1K table stack */
 	uint32			*vmm_rev;		/* reverse map */
+	KATOMIC_CCLOCK	revlock;
 } KSTATE;
 
 typedef struct _KCPUSTATE {
@@ -149,7 +151,6 @@ typedef struct _KCPUSTATE {
 	KSTATE			*ks;
 	KPROCESS		*cproc;
 	KTHREAD			*cthread;
-	uint32			ptirq;
 } KCPUSTATE;
 
 void stackprinter();
