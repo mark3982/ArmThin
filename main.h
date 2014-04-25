@@ -72,10 +72,11 @@
 #define KSWI_TERMPROCESS		107
 #define KSWI_TERMTHREAD			108
 
-#define KTHREAD_SLEEPING		0x1
-#define KTHREAD_WAKEUP			0x2
-#define KTHREAD_KIDLE			0x4
-#define KTHREAD_DEAD			0x8
+#define KTHREAD_SLEEPING			0x01
+#define KTHREAD_WAKEUP				0x02
+#define KTHREAD_KIDLE				0x04
+#define KTHREAD_DEAD				0x08
+#define KTHREAD_WAKINGUPKTHREAD		0x10
 
 #define KPROCESS_DEAD			0x1
 	
@@ -90,6 +91,24 @@ typedef struct _MWSR {
 	uint32			max;
 	KATOMIC_CCLOCK	lock;
 } MWSR;
+
+typedef struct _MWSRGLA_BLOCK {
+	/* LL compatible */
+	struct _MWSRGLA_BLOCK	*next;
+	struct _MWSRGLA_BLOCK	*prev;
+	
+	uint32					used;
+	uint32					flags;
+	uint32					max;
+	uintptr					slots[];
+} MWSRGLA_BLOCK;
+
+typedef struct _MWSRGLA {
+	uint32					dmax;
+	MWSRGLA_BLOCK			*fblock;
+	KATOMIC_CCLOCK			lock;			/* cpu lock */
+	KATOMIC_CCLOCK			tlock;			/* thread lock */
+} MWSRGLA;
 	
 struct _KPROCESS;
 	
@@ -135,7 +154,11 @@ typedef struct _KSTATE {
 	KATOMIC_CCLOCK				schedlock;
 	KSTACK						runnable;
 
+	/* kernel thread dealloc */
 	MWSR						dealloc;
+	
+	/* kernel thread signal */
+	MWSRGLA						ktsignal;
 	
 	/* restart catch (or another cpu starting) */
 	uint32						rescatch;

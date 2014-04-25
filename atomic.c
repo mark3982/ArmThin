@@ -34,6 +34,22 @@ int katomic_lockspin(volatile uint32 *ptr, uint32 id) {
 	while (!katomic_locktake(ptr, 0, id));
 }
 
+int katomic_lockspin_yield(volatile KATOMIC_CCLOCK *ptr, uint32 id) {
+	uint32			cyclecnt;
+
+	cyclecnt = 0;
+	while (!katomic_locktake(&ptr->lock, 0, id) || ptr->lock != id) {
+		asm("swi %[code]" : : [code]"i" (KSWI_YEILD));
+		cyclecnt++;
+		if (cyclecnt > 400) {
+			kprintf("WHOA-THIS-YIELD-LOCK-TAKING-A-LONG-TIME lock:%x id:%x myid:%x", ptr, ptr->lock, id);
+			for (;;);
+		}
+	}
+	//kprintf("ATOMIC-LOCK-AQUIRE lock:%x owner:%x myid:%x\n", ptr, ptr->lock, id);
+	ptr->cnt++;
+}
+
 int katomic_lockspin_wfe(volatile KATOMIC_CCLOCK *ptr, uint32 id) {
 	uint32			cyclecnt;
 
@@ -42,7 +58,7 @@ int katomic_lockspin_wfe(volatile KATOMIC_CCLOCK *ptr, uint32 id) {
 		asm volatile ("wfe");
 		cyclecnt++;
 		if (cyclecnt > 200) {
-			kprintf("WHOA-THIS-LOCK-TAKING-A-LONG-TIME lock:%x id:%x myid:%x", ptr, ptr->lock, id);
+			kprintf("WHOA-THIS-WFE-LOCK-TAKING-A-LONG-TIME lock:%x id:%x myid:%x", ptr, ptr->lock, id);
 			for (;;);
 		}
 	}
@@ -59,6 +75,14 @@ void katomic_ccenter(volatile uint32 *ptr) {
 	katomic_lockspin(ptr, cpuid);			/* spin until we grab the lock */
 }
 
+void katomic_ccenter_yield(volatile KATOMIC_CCLOCK *ptr) {
+	KCPUSTATE		*cs;
+	
+	cs = GETCS();
+	
+	katomic_lockspin_yield(ptr, (uint32)cs->cthread);
+}
+
 /* critical cpu enter (per cpu locking) */
 void katomic_ccenter_wfe(volatile KATOMIC_CCLOCK *ptr) {
 	uint32			cpuid;
@@ -66,6 +90,24 @@ void katomic_ccenter_wfe(volatile KATOMIC_CCLOCK *ptr) {
 	cpuid = boardGetCPUID() + 1;				/* get our cpu ID */
 	/* +1 because CPU0 is value 0 which is released value */
 	katomic_lockspin_wfe(ptr, cpuid);			/* spin until we grab the lock */
+}
+
+
+void katomic_ccexit_yield(volatile KATOMIC_CCLOCK *ptr) {
+	KCPUSTATE		*cs;
+	
+	cs = GETCS();
+
+	if (ptr->lock != (uint32)cs->cthread) {
+		kprintf("lock:%x owner:%x this-thread:%x\n", ptr, ptr->lock, cs->cthread);
+		PANIC("RELEASE-OF-UNOWNED-WFE-LOCK");
+	}
+	
+	ptr->cnt--;
+	
+	if (ptr->cnt == 0) {
+		ptr->lock = 0;
+	}
 }
 
 void katomic_ccexit_sev(volatile KATOMIC_CCLOCK *ptr) {
@@ -76,7 +118,7 @@ void katomic_ccexit_sev(volatile KATOMIC_CCLOCK *ptr) {
 	/* a little sanity check.. do we own this lock? */
 	if (ptr->lock != cpuid) {
 		kprintf("lock:%x owner:%x this-cpu:%x\n", ptr, ptr->lock, cpuid);
-		PANIC("RELEASE-OF-UNOWNED-LOCK");
+		PANIC("RELEASE-OF-UNOWNED-WFE-LOCK");
 	}
 	
 	ptr->cnt--;										/* decrement reference count */

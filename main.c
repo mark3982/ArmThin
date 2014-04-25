@@ -466,6 +466,103 @@ int kprocfree(KPROCESS *proc) {
 	return 1;
 }
 
+int mwsrgla_get(MWSRGLA *mwsrgla, MWSRGLA_BLOCK **cblock, uint32 *index, uintptr *val) {
+	uint32				x;
+	MWSRGLA_BLOCK		*b;
+	
+	katomic_ccenter_yield(&mwsrgla->tlock);
+	
+	if (!*cblock) {
+		*cblock = mwsrgla->fblock;
+		*index = 0;
+	}
+	
+	b = *cblock;
+	
+	if (*index > b->max) {
+		PANIC("*index > mwsrgla->dmax");
+		katomic_ccexit_yield(&mwsrgla->tlock);
+		return 0;
+	}
+	
+	/* bad mojo but its a lot simplier to read and optimize for i think */
+	goto skipinside;
+	
+	for (b = *cblock; b; b = b->next) {
+		*index = 0;
+		
+		skipinside:					/* loop entry */
+		if (b->used == 0) {
+			continue;
+		}
+		
+		for (x = *index; x < b->max; ++x) {
+			if (b->slots[x]) {
+				*index = x + 1;
+				*val = b->slots[x];
+				*cblock = b;
+				b->used--;				/* update used count */
+				katomic_ccexit_yield(&mwsrgla->tlock);
+				return 1;
+			}
+		}
+	}
+	
+	*cblock = 0;
+	*index = 0;
+	katomic_ccexit_yield(&mwsrgla->tlock);
+	return 0;
+}
+
+int mwsrgla_add(MWSRGLA *mwsrgla, uintptr val) {
+	MWSRGLA_BLOCK			*b;
+	uint32					x;
+	
+	KCCENTER(&mwsrgla->lock);
+	for (b = mwsrgla->fblock; b; b = b->next) {
+		if (b->used < b->max) {
+			for (x = 0; x < b->max; ++x) {
+				if (!b->slots[x]) {
+					b->slots[x] = val;
+					++b->used;
+					KCCEXIT(&mwsrgla->lock);
+					return 1;
+				}
+			}
+		}
+	}
+	/* we need to add another block */
+	b = (MWSRGLA_BLOCK*)kmalloc(sizeof(MWSRGLA_BLOCK) + sizeof(uintptr) * mwsrgla->dmax);
+	b->max = mwsrgla->dmax;
+	b->flags = 0;
+	b->used = 0;
+	ll_add((void**)&mwsrgla->fblock, b);
+	/* store value */
+	++b->used;
+	b->slots[0] = val;
+	KCCEXIT(&mwsrgla->lock);
+}
+
+int mwsrgla_init(MWSRGLA *mwsrgla, uint32 dmax) {
+	uint32			x;
+
+	mwsrgla->dmax = dmax;
+	mwsrgla->fblock = (MWSRGLA_BLOCK*)kmalloc(sizeof(MWSRGLA_BLOCK) + sizeof(uintptr) * dmax);
+	if (!mwsrgla->fblock) {
+		PANIC("MWSRGLA_INIT FAILED WITH KMALLOC");
+		return 0;
+	}
+	mwsrgla->fblock->flags = 0;
+	mwsrgla->fblock->next = 0;
+	mwsrgla->fblock->prev = 0;
+	mwsrgla->fblock->max = dmax;
+	for (x = 0; x < dmax; ++x) {
+		mwsrgla->fblock->slots[x] = 0;
+	}
+	
+	return 1;
+}
+
 int mwsr_init(MWSR *mwsr, uint32 max) {
 	memset(mwsr, 0, sizeof(MWSR));
 	mwsr->max = max;
@@ -712,7 +809,16 @@ void k_exphandler(uint32 lr, uint32 type) {
 				ksched();
 				break;
 			case KSWI_KERNELMSG:
+				/* make sure the kthread wakes up */
+				/* TODO: IF MULTIPLE KTHREADS THEN CONSIDER WAKING ONE UP OR IN SOME ORDER */
 				ks->kservthread->flags |= KTHREAD_WAKEUP;
+				if (cs->cthread->flags & KTHREAD_WAKINGUPKTHREAD) {
+					/* prevention of DOS attack on service */
+					break;
+				}
+				cs->cthread->flags |= KTHREAD_WAKINGUPKTHREAD;
+				/* add signal for thread (internal locking per cpu) */
+				mwsrgla_add(&ks->ktsignal, (uintptr)cs->cthread);
 				break;
 			default:
 				break;
@@ -997,6 +1103,51 @@ static uint32 rand(uint32 next)
     return (uint32)(next / 65536) % 32768;
 }
 
+int kthread_threadverify(KPROCESS *tarproc, KTHREAD *tarth) {
+	uint32			x, y;
+	KPROCESS		*proc;
+	KTHREAD			*th;
+	KSTATE			*ks;
+	
+	ks = GETKS();
+	
+	kprintf("[kthread] threadverify iterating process/thread chains\n");
+	y = 1;
+	while (y) {
+		/* grab lock on deallocation array and free threads */		
+		x = 0;
+		y = 0;
+		for (proc = ks->procs; proc; proc = proc->next) {
+			if (!proc || (proc->flags & KPROCESS_DEAD)) {
+				y = 1;
+				kprintf("[kthread] iteration RESET\n");
+				break;
+			}
+			
+			if (tarproc != proc) {
+				continue;
+			}
+			
+			y = 0;
+			for (th = proc->threads; th; th = th->next) {
+				if (!th || (th->flags & KTHREAD_DEAD)) {
+					y = 1;
+					kprintf("[kthread] iteration RESET\n");
+					break;
+				}
+				if (tarth == th) {
+					return 1;
+				}
+			}
+			if (y) {
+				break;
+			}
+		}
+	}
+	/* invalid */
+	return 0;
+}
+
 void kthread(KTHREAD *myth) {
 	uint32			x, y;
 	KPROCESS		*proc;
@@ -1012,6 +1163,9 @@ void kthread(KTHREAD *myth) {
 	uint32			tt, bytes;
 	uint32			cycle;
 	void			*ptr;
+	MWSRGLA_BLOCK	*mwsrglab;
+	uint32			mwsrglandx;
+
 	
 	KTHREAD			**toc, **_toc;
 	uint32			tocmax;
@@ -1024,103 +1178,25 @@ void kthread(KTHREAD *myth) {
 	memset(toc, 0, sizeof(KTHREAD*) * tocmax);
 	
 	for (;;) {
-		/*
-				okay this big mess needs some explaining... essentially what happened here
-				is that this runs as a thread which is subject to being interrupted and switched
-				out so it cant just aquire a lock because it could be switched out.. now we could
-				just disable interrupts to prevent it from being switched out and that would work
-				
-				but since i had already written this complicated system that is *almost* lockless
-				except between CPUs I decided to go ahead and leave it in, but basically what happens
-				is when a thread(s)/process(es) are dead they are not immediantly freed but instead
-				they get placed into the MWSR structure, well the CPUs have to lock the MWSR and they
-				write in the pointer, then we come later and free them (directly below) this allows
-				us to not have broken links in the process chain and thread chain so we can try to
-				follow it while it *might* be getting modified..
-				
-				the advantage is it prevents this thread from having to essentially lock the scheduler
-				out which lets the CPUs continually manage threads, the only cost for the CPUs in term
-				of waiting is when two CPUs are trying to kill a thread or process at the same time then
-				they end up waiting on each other to write to the MWSR which should be a fairly quick
-				operation.. the other side is if we locked it here then they (CPUs) would have to wait until
-				we transversed the process and thread chains before the scheduler could run
-				
-				so... anyway... big mess... maybe it turns out good...
-		*/
 		kprintf("[kthread] deallocing on MWSR\n");
 		/* grab deallocated objects and free them */
+		/* TODO: FOR MULTIPLE KTHREADS PUT INTER-THREAD LOCK-A AQUIRE HERE */
 		while(mwsr_getone(&ks->dealloc, (uintptr*)&ptr)) {
 			kfree(ptr);
 			kprintf("[kthread] dealloc %x\n", ptr);
 		}
+		/* TODO: FOR MULTIPLE KTHREADS PUT INTER-THREAD LOCK-A RELEASE HERE */
 		
-		kprintf("[kthread] iterating process/thread chains\n");
-		y = 1;
-		while (y) {
-			/* grab lock on deallocation array and free threads */		
-			x = 0;
-			y = 0;
-			for (proc = ks->procs; proc; proc = proc->next) {
-				if (!proc || (proc->flags & KPROCESS_DEAD)) {
-					y = 1;
-					kprintf("[kthread] iteration RESET\n");
-					break;
-				}
-				y = 0;
-				for (th = proc->threads; th; th = th->next) {
-					if (!th || (th->flags & KTHREAD_DEAD)) {
-						y = 1;
-						kprintf("[kthread] iteration RESET\n");
-						break;
-					}
-					toc[x++] = th;
-					if (x == tocmax) {
-						kprintf("[kthread] iteration GROWING TOC\n");
-						/* (1) save old pointer, (2) allocate bigger array
-						   (3) clear bigger array, (4) copy to older array
-						*/
-						_toc = toc;
-						toc = (KTHREAD**)kmalloc(sizeof(KTHREAD*) * tocmax * 2);
-						memset(toc, 0, sizeof(KTHREAD*) * tocmax * 2);
-						for (y = 0; y < x; ++y) {
-							toc[y] = _toc[y];
-						}
-						tocmax *= 2;
-						/* (5) free old array */
-						kfree(_toc);
-					}
-				}
-				if (y) {
-					break;
-				}
-			}
-		}
+		/* check ring buffers only for threads that have signaled us */		
+		mwsrglab = 0;
+		mwsrglandx = 0;
 		
-		/* clear remaining entries in array not used */
-		for (; x < tocmax; ++x) {
-			toc[x] = 0;
-		}
-		
-		/* check ring buffers for all threads */
-		for (x = 0; x < tocmax; ++x) {
-			if (!toc[x]) {
-				continue;
-			}
+		kprintf("[kthread] checking MWSRGLA\n");
+		/* mwsrgla has a per-thread lock so it supports multiple threads */
+		while (mwsrgla_get(&ks->ktsignal, &mwsrglab, &mwsrglandx, (uintptr*)&th)) {		
+			/* remove DOS prevention flag */
+			th->flags &= ~KTHREAD_WAKINGUPKTHREAD;
 			
-			th = toc[x];
-			
-			if (!th->ktx.rb) {
-				/* ring buffer not instanced */
-				continue;
-			}
-			
-			/*
-				TODO: this needs improving.. maybe instead of checking all
-				      we could only check the ones that have been alerted
-					  with a KSWI_KERNELMSG system call, using a lock for
-					  the CPUs and an array.. possibly using the MWSR structure
-					  for doing this...
-			*/
 			kprintf("[kthread] reading RB for thread:%x[%s]\n", th, th->dbgname);
 			for (sz = sizeof(pkt); rb_read_nbio(&th->ktx, &pkt[0], &sz, 0); sz = sizeof(pkt)) {
 				kprintf("[kthread] got pkt\n");
@@ -1128,7 +1204,11 @@ void kthread(KTHREAD *myth) {
 				switch (pkt[0] & 0xff) {
 					case 0:
 						/* send message to another process:thread */
-						
+						if (kthread_threadverify((KPROCESS*)pkt[1], (KTHREAD*)pkt[2])) {
+							/* add message to ring buffer */
+						} else {
+							/* send message back for error */
+						}
 						break;
 					case 1:
 						/* register service */
@@ -1280,6 +1360,11 @@ void start() {
 		to free them as needed
 	*/
 	mwsr_init(&ks->dealloc, 10);
+	/*
+		this is used to hold active signals for kthread to service
+		the ring buffer of specified thread
+	*/
+	mwsrgla_init(&ks->ktsignal, 10);
 		
 	#define KMODTYPE_ELFUSER			1
 	/*
