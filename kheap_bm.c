@@ -24,6 +24,8 @@ int k_heapBMAddBlockEx(KHEAPBM *heap, uintptr addr, uint32 size, uint32 bsize, K
 	uint32				bcnt;
 	uint32				x;
 	
+	KCCENTER(&heap->lock);
+	
 	b->size = size;
 	b->bsize = bsize;
 	b->data = addr;
@@ -55,6 +57,8 @@ int k_heapBMAddBlockEx(KHEAPBM *heap, uintptr addr, uint32 size, uint32 bsize, K
 	
 	b->used = bcnt;
 	kprintf("HEREZ bcnt:%x b->used:%x b->lfb:%x\n", bcnt, b->used, b->lfb);
+	
+	KCCEXIT(&heap->lock);
 	return 1;
 }
 
@@ -76,6 +80,8 @@ void *k_heapBMAllocBound(KHEAPBM *heap, uint32 size, uint32 bound) {
 	uint32				bneed;
 	uint8				nid;
 	uint32				max;
+	
+	KCCENTER(&heap->lock);
 	
 	bound = ~(~0 << bound);
 	/* iterate blocks */
@@ -117,6 +123,7 @@ void *k_heapBMAllocBound(KHEAPBM *heap, uint32 size, uint32 bound) {
 
 						/* count used blocks NOT bytes */
 						b->used += y;
+						KCCEXIT(&heap->lock);
 						return (void*)((x * b->bsize) + b->data);
 					}
 					
@@ -127,7 +134,7 @@ void *k_heapBMAllocBound(KHEAPBM *heap, uint32 size, uint32 bound) {
 			}
 		}
 	}
-	
+	KCCEXIT(&heap->lock);
 	return 0;
 }
 
@@ -138,6 +145,8 @@ void k_heapBMSet(KHEAPBM *heap, uintptr ptr, uintptr size, uint8 rval) {
 	uint8				*bm;
 	uint8				id;
 	uint32				max;
+	
+	KCCENTER(&heap->lock);
 	
 	for (b = heap->fblock; b; b = b->next) {
 		/* check if region effects block */
@@ -189,6 +198,7 @@ void k_heapBMSet(KHEAPBM *heap, uintptr ptr, uintptr size, uint8 rval) {
 		}
 	}
 	
+	KCCEXIT(&heap->lock);
 	/* this error needs to be raised or reported somehow */
 	return;
 }
@@ -200,6 +210,8 @@ int k_heapBMFree(KHEAPBM *heap, void *ptr) {
 	uint8				*bm;
 	uint8				id;
 	uint32				max;
+	
+	KCCENTER(&heap->lock);
 	
 	for (b = heap->fblock; b; b = b->next) {
 		if ((uintptr)ptr > b->data && (uintptr)ptr < b->data + b->size) {
@@ -218,10 +230,12 @@ int k_heapBMFree(KHEAPBM *heap, void *ptr) {
 			}
 			/* update free block count */
 			b->used -= x - bi;
+			KCCEXIT(&heap->lock);
 			return 1;
 		}
 	}
 	
+	KCCEXIT(&heap->lock);
 	/* this error needs to be raised or reported somehow */
 	return 0;
 }

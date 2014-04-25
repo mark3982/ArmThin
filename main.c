@@ -29,6 +29,19 @@ void __attribute__((naked)) __attribute__((section(".boot"))) entry() {
 	asm volatile ("b boardEntry");
 }
 
+void memset(void *p, uint8 v, uintptr sz) {
+	uint8 volatile		*_p;
+	uintptr				x;
+	
+	_p = (uint8*)p;
+	
+	for (x = 0; x < sz; ++x) {
+		_p[x] = v;
+	}
+	
+	return;
+}
+
 /* small chunk memory alloc/free */
 void kfree(void *ptr) {
 	KSTATE			*ks;
@@ -162,11 +175,6 @@ void kpfree(void *ptr) {
 	ks = GETKS();
 	k_heapBMFree(&ks->hphy, ptr);
 }
-
-typedef struct _LL {
-	struct _LL			*next;
-	struct _LL			*prev;
-} LL;
 
 void ll_add(void **p, void *i) {
 	LL		*_i;
@@ -458,6 +466,66 @@ int kprocfree(KPROCESS *proc) {
 	return 1;
 }
 
+int mwsr_init(MWSR *mwsr, uint32 max) {
+	memset(mwsr, 0, sizeof(MWSR));
+	mwsr->max = max;
+	mwsr->dealloc = (uintptr*)kmalloc(sizeof(uintptr) * max);
+	if (!mwsr->dealloc) {
+		PANIC("MWSR->DEALLOC NULL ON ALLOC");
+		return 0;
+	}
+	mwsr->deallocw = 0;			/* just to be safe */
+	return 1;
+}
+
+int mwsr_getone(MWSR *mwsr, uintptr *v) {
+	uint32			x;
+
+	for (x = 0; x < mwsr->max; ++x) {
+		if (mwsr->dealloc[x]) {
+			*v = mwsr->dealloc[x];
+			mwsr->dealloc[x] = 0;
+			return 1;
+		}
+	}
+	*v = 0;
+	return 0;
+}
+
+int mwsr_add(MWSR *mwsr,  uintptr v) {
+	LL			*ll, *_ll;
+	uint32		x;
+	
+	KCCENTER(&mwsr->lock);
+	
+	for (x = 0; x < mwsr->max; ++x) {
+		if (!mwsr->dealloc[x]) {
+			mwsr->dealloc[x] = v;
+		}
+	}
+
+	/* periodically we can dump these back into the 'dealloc' array */
+	if (x >= mwsr->max) {
+		/* link it into wait list */
+		ll_add((void**)&mwsr->deallocw, (void*)v);
+	} else {
+		/* try to dump (some of) these in the dealloc list */
+		ll = mwsr->deallocw;
+		for (x = 0; ll && (x < mwsr->max); ++x) {
+			if (!mwsr->dealloc[x]) {	/* free slot? */
+				_ll = ll;				/* get handle on current (about to be removed) */
+				ll = ll->next;			/* get next (ahead of time) [ll may be null] */
+				ll_rem((void**)&mwsr->deallocw, (void*)_ll);
+				/* put in last incase it gets grabbed before the above */
+				mwsr->dealloc[x] = (uintptr)ll;
+			}
+		}										
+	}
+	
+	KCCEXIT(&mwsr->lock);
+	return 1;
+}
+
 //__attribute__((optimize("O0")))
 //__attribute__ ((noinline))
 void k_exphandler(uint32 lr, uint32 type) {
@@ -473,6 +541,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 	KTHREAD			*th, *_th;
 	KCPUSTATE		*cs;
 	uint32			*stk;
+	LL				*ll;
 	
 	cs = GETCS();
 	ks = GETKS();
@@ -518,9 +587,11 @@ void k_exphandler(uint32 lr, uint32 type) {
 				   scheduler can grab next thread */
 				KCCENTER(&ks->schedlock);
 				proc = cs->cproc;
-				th = cs->cthread;
-				_th = th->next;
-				th->next = 0;
+				proc->flags |= KPROCESS_DEAD;
+				
+				/* add dead process to be deallocated */
+				mwsr_add(&ks->dealloc, (uintptr)proc);
+				
 				/* should schedule a thread from the next process */
 				ksched();
 				/* restore pointer */
@@ -528,8 +599,9 @@ void k_exphandler(uint32 lr, uint32 type) {
 				/* cycle through threads releasing resources */
 				for (th = proc->threads; th; th = _th) {
 					_th = th->next;
-					/* release heap memory */
-					kfree(th);
+					/* add thread to either dealloc or deallocw */
+					mwsr_add(&ks->dealloc, (uintptr)th);
+					th->flags |= KTHREAD_DEAD;
 				}
 				/* free process resources */
 				if (!kprocfree(proc)) {
@@ -537,7 +609,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 				}
 				/* release heap memory */
 				kfree(proc);
-				KCCEXIT(&ks->schedlock);
+				KCCEXIT(&ks->schedlock);;
 				break;
 			case KSWI_TERMTHREAD:
 				KCCENTER(&ks->schedlock);
@@ -547,7 +619,8 @@ void k_exphandler(uint32 lr, uint32 type) {
 				ksched();
 				/* now unlink and free thread resources */
 				ll_rem((void**)&proc->threads, th);
-				kfree(th);
+				mwsr_add(&ks->dealloc, (uintptr)th);
+				th->flags |= KTHREAD_DEAD;
 				KCCEXIT(&ks->schedlock);
 				break;
 			case KSWI_VALLOC:
@@ -749,19 +822,6 @@ typedef struct {
        Elf32_Word      sh_entsize;
 } ELF32_SHDR;
 
-void memset(void *p, uint8 v, uintptr sz) {
-	uint8 volatile		*_p;
-	uintptr				x;
-	
-	_p = (uint8*)p;
-	
-	for (x = 0; x < sz; ++x) {
-		_p[x] = v;
-	}
-	
-	return;
-}
-
 KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	ELF32_EHDR			*ehdr;
 	ELF32_SHDR			*shdr;
@@ -775,7 +835,7 @@ KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	kprintf("@@ loading elf into memory space\n");
 	
 	ks = GETKS();
-		
+	
 	kprintf("HERE\n");
 		
 	ehdr = (ELF32_EHDR*)addr;
@@ -792,13 +852,19 @@ KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	if (!proc->vmm.table) {
 		kvmm2_init(&proc->vmm);
 	}
-
+	
+	KCCENTER(&ks->schedlock);
+	
 	th = (KTHREAD*)kmalloc(sizeof(KTHREAD));
 	memset(th, 0, sizeof(KTHREAD));
 	ll_add((void**)&proc->threads, th);
 	
+	/* so it does not get run yet */
+	th->flags = KTHREAD_SLEEPING;
+	
+	KCCEXIT(&ks->schedlock);
+	
 	th->pc = ehdr->e_entry;
-	th->flags = 0;
 	th->cpsr = 0x60000000 | ARM4_MODE_USER;
 	/* set stack */
 	th->sp = 0x90000800;
@@ -907,6 +973,8 @@ KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	/* flush TLB */
 	asm("mcr p15, #0, r0, c8, c7, #0");
 	kprintf("     elf-load: DONE\n");
+	/* allow it to be run */
+	th->flags = 0;
 	return th;
 }
 
@@ -930,7 +998,7 @@ static uint32 rand(uint32 next)
 }
 
 void kthread(KTHREAD *myth) {
-	uint32			x;
+	uint32			x, y;
 	KPROCESS		*proc;
 	KTHREAD			*th;
 	KSTATE			*ks;
@@ -943,55 +1011,155 @@ void kthread(KTHREAD *myth) {
 	uint32			st;
 	uint32			tt, bytes;
 	uint32			cycle;
+	void			*ptr;
+	
+	KTHREAD			**toc, **_toc;
+	uint32			tocmax;
 	
 	ks = GETKS();
 	
+	/* initial array allocation */
+	tocmax = 10;
+	toc = (KTHREAD**)kmalloc(sizeof(KTHREAD*) * tocmax);
+	memset(toc, 0, sizeof(KTHREAD*) * tocmax);
+	
 	for (;;) {
-		/* check ring buffers for all threads */
-		for (proc = ks->procs; proc; proc = proc->next) {
-			for (th = proc->threads; th; th = th->next) {
-				if (!th->ktx.rb) {
-					/* ring buffer not instanced */
-					continue;
+		/*
+				okay this big mess needs some explaining... essentially what happened here
+				is that this runs as a thread which is subject to being interrupted and switched
+				out so it cant just aquire a lock because it could be switched out.. now we could
+				just disable interrupts to prevent it from being switched out and that would work
+				
+				but since i had already written this complicated system that is *almost* lockless
+				except between CPUs I decided to go ahead and leave it in, but basically what happens
+				is when a thread(s)/process(es) are dead they are not immediantly freed but instead
+				they get placed into the MWSR structure, well the CPUs have to lock the MWSR and they
+				write in the pointer, then we come later and free them (directly below) this allows
+				us to not have broken links in the process chain and thread chain so we can try to
+				follow it while it *might* be getting modified..
+				
+				the advantage is it prevents this thread from having to essentially lock the scheduler
+				out which lets the CPUs continually manage threads, the only cost for the CPUs in term
+				of waiting is when two CPUs are trying to kill a thread or process at the same time then
+				they end up waiting on each other to write to the MWSR which should be a fairly quick
+				operation.. the other side is if we locked it here then they (CPUs) would have to wait until
+				we transversed the process and thread chains before the scheduler could run
+				
+				so... anyway... big mess... maybe it turns out good...
+		*/
+		kprintf("[kthread] deallocing on MWSR\n");
+		/* grab deallocated objects and free them */
+		while(mwsr_getone(&ks->dealloc, (uintptr*)&ptr)) {
+			kfree(ptr);
+			kprintf("[kthread] dealloc %x\n", ptr);
+		}
+		
+		kprintf("[kthread] iterating process/thread chains\n");
+		y = 1;
+		while (y) {
+			/* grab lock on deallocation array and free threads */		
+			x = 0;
+			y = 0;
+			for (proc = ks->procs; proc; proc = proc->next) {
+				if (!proc || (proc->flags & KPROCESS_DEAD)) {
+					y = 1;
+					kprintf("[kthread] iteration RESET\n");
+					break;
 				}
-				kprintf("[kthread] reading RB\n");
-				for (sz = sizeof(pkt); rb_read_nbio(&th->ktx, &pkt[0], &sz, 0); sz = sizeof(pkt)) {
-					kprintf("[kthread] got pkt\n");
-					/* check packet type */
-					switch (pkt[0] & 0xff) {
-						case 0:
-							/* send message to another process:thread */
-							break;
-						case 1:
-							/* register service */
-							break;
-						case 2:
-							/* enumerate services */
-							break;
-						case 3:
-							/* request shared memory from another process:thread */
-							/* check for existing request (only one at a time!) */
-							/* add request entry */
-							/* send message to target process:thread */
-							break;
-						case 4:
-							/* accept shared memory request from another process */
-							/* grab process:thread list modify lock (can be read but not modified) */
-								/* find request entry */
-									/* map memory to process that is accepting request */
-									/* increment ref count on physical pages */
-							/* grab vmm lock on both processes (vmm for processes can not be modified) */
-							/* release vmm lock and release process:thread list modify lock */
-							break;
-						case 5:
-							/* terminate (this thread) or any other thread */
-							break;
-						case 6:
-							/* terminate (this process) or any other process */
-							break;
+				y = 0;
+				for (th = proc->threads; th; th = th->next) {
+					if (!th || (th->flags & KTHREAD_DEAD)) {
+						y = 1;
+						kprintf("[kthread] iteration RESET\n");
+						break;
+					}
+					toc[x++] = th;
+					if (x == tocmax) {
+						kprintf("[kthread] iteration GROWING TOC\n");
+						/* (1) save old pointer, (2) allocate bigger array
+						   (3) clear bigger array, (4) copy to older array
+						*/
+						_toc = toc;
+						toc = (KTHREAD**)kmalloc(sizeof(KTHREAD*) * tocmax * 2);
+						memset(toc, 0, sizeof(KTHREAD*) * tocmax * 2);
+						for (y = 0; y < x; ++y) {
+							toc[y] = _toc[y];
+						}
+						tocmax *= 2;
+						/* (5) free old array */
+						kfree(_toc);
 					}
 				}
+				if (y) {
+					break;
+				}
 			}
+		}
+		
+		/* clear remaining entries in array not used */
+		for (; x < tocmax; ++x) {
+			toc[x] = 0;
+		}
+		
+		/* check ring buffers for all threads */
+		for (x = 0; x < tocmax; ++x) {
+			if (!toc[x]) {
+				continue;
+			}
+			
+			th = toc[x];
+			
+			if (!th->ktx.rb) {
+				/* ring buffer not instanced */
+				continue;
+			}
+			
+			/*
+				TODO: this needs improving.. maybe instead of checking all
+				      we could only check the ones that have been alerted
+					  with a KSWI_KERNELMSG system call, using a lock for
+					  the CPUs and an array.. possibly using the MWSR structure
+					  for doing this...
+			*/
+			kprintf("[kthread] reading RB for thread:%x[%s]\n", th, th->dbgname);
+			for (sz = sizeof(pkt); rb_read_nbio(&th->ktx, &pkt[0], &sz, 0); sz = sizeof(pkt)) {
+				kprintf("[kthread] got pkt\n");
+				/* check packet type */
+				switch (pkt[0] & 0xff) {
+					case 0:
+						/* send message to another process:thread */
+						
+						break;
+					case 1:
+						/* register service */
+						break;
+					case 2:
+						/* enumerate services */
+						break;
+					case 3:
+						/* request shared memory from another process:thread */
+						/* check for existing request (only one at a time!) */
+						/* add request entry */
+						/* send message to target process:thread */
+						break;
+					case 4:
+						/* accept shared memory request from another process */
+						/* grab process:thread list modify lock (can be read but not modified) */
+							/* find request entry */
+								/* map memory to process that is accepting request */
+								/* increment ref count on physical pages */
+						/* grab vmm lock on both processes (vmm for processes can not be modified) */
+						/* release vmm lock and release process:thread list modify lock */
+						break;
+					case 5:
+						/* terminate (this thread) or any other thread */
+						break;
+					case 6:
+						/* terminate (this process) or any other process */
+						break;
+				}
+			}
+			kprintf("[kthread] done reading RB\n");
 		}
 		kprintf("[kthread] sleeping\n");
 		ksleep(ks->tpers * 10);
@@ -1105,6 +1273,13 @@ void start() {
 	th->proc = process;
 	ks->idleth = th;
 	ks->idleproc = process;
+	
+	/*
+		this allows deallocated threads and process structures
+		to be kept along for the kthread to use, and allows it
+		to free them as needed
+	*/
+	mwsr_init(&ks->dealloc, 10);
 		
 	#define KMODTYPE_ELFUSER			1
 	/*

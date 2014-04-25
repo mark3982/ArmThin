@@ -1,6 +1,7 @@
 #ifndef ARMOS_KH_KHEAP
 #define ARMOS_KH_KHEAP
 #include "stdtypes.h"
+#include "atomic.h"
 
 //#define K_HEAP_TYPE_LINKEDCHUNKSANDBLOCKS
 #ifdef K_HEAP_TYPE_LINKEDCHUNKSANDBLOCKS
@@ -46,7 +47,8 @@ typedef struct _KHEAPBLOCKBM {
 } KHEAPBLOCKBM;
 
 typedef struct _KHEAPBM {
-	KHEAPBLOCKBM			*fblock;
+	KHEAPBLOCKBM				*fblock;
+	KATOMIC_CCLOCK volatile		lock;
 } KHEAPBM;
 
 typedef struct _KHEAPBLOCKSS {

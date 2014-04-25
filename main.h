@@ -75,6 +75,21 @@
 #define KTHREAD_SLEEPING		0x1
 #define KTHREAD_WAKEUP			0x2
 #define KTHREAD_KIDLE			0x4
+#define KTHREAD_DEAD			0x8
+
+#define KPROCESS_DEAD			0x1
+	
+typedef struct _LL {
+	struct _LL			*next;
+	struct _LL			*prev;
+} LL;
+	
+typedef struct _MWSR {
+	LL				*deallocw;
+	uintptr			*dealloc;
+	uint32			max;
+	KATOMIC_CCLOCK	lock;
+} MWSR;
 	
 struct _KPROCESS;
 	
@@ -108,6 +123,8 @@ typedef struct _KPROCESS {
 	
 	KVMMTABLE			vmm;
 	KTHREAD				*threads;
+	
+	uint32				flags;
 } KPROCESS;
 
 typedef struct _KSTATE {
@@ -117,6 +134,8 @@ typedef struct _KSTATE {
 	KPROCESS					*idleproc;
 	KATOMIC_CCLOCK				schedlock;
 	KSTACK						runnable;
+
+	MWSR						dealloc;
 	
 	/* restart catch (or another cpu starting) */
 	uint32						rescatch;

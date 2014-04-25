@@ -7,7 +7,6 @@ import attachmod
 '''
 	COMMAND LINE SUPPORT
 '''
-
 def __executecmd(cwd, args):
 	p = subprocess.Popen(args, cwd = cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE)
 	return (p.stdout.read().decode('utf-8'), p.stderr.read().decode('utf-8'))

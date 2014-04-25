@@ -4,6 +4,9 @@
 #include "main.h"
 #include "atomic.h"
 
+/* this enables the usage of locking per VMM table */
+#define KVMMLOCK
+
 typedef struct _KVMMTABLE {
 	uint32			*table;
 	KATOMIC_CCLOCK	lock;		/* only one concurrent execution state at a time */
@@ -51,6 +54,9 @@ typedef struct _KSTACK {
 #define KVMM_REPLACE						0x20000000
 #define KVMM2_ALLOCREGION_NOFIND			0x10000000
 
+/*
+	The core functionality is exposed by these functions.
+*/
 int kvmm2_baseinit();
 int kvmm2_init_revtable();
 int kvmm2_init(KVMMTABLE *t);
