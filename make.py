@@ -181,8 +181,8 @@ cfg['CC'] = 'arm-eabi-gcc'
 cfg['LD'] = 'arm-eabi-ld'
 cfg['AR'] = 'arm-eabi-ar'
 cfg['OBJCOPY'] = 'arm-eabi-objcopy'
-cfg['CCFLAGS'] = '-save-temps -save-temps=cwd -O3 -mcpu=cortex-a9 -fno-builtin-printf -fno-builtin-sprintf -fno-builtin-memset'
-cfg['hdrpaths'] = ['../../']
+cfg['CCFLAGS'] = '-save-temps -save-temps=cwd -Os -mcpu=cortex-a9 -fno-builtin-printf -fno-builtin-sprintf -fno-builtin-memset'
+cfg['hdrpaths'] = ['../../', '../']
 cfg['dirofboards'] = './boards'
 cfg['dirofmodules'] = './modules'
 cfg['board'] = 'realview-pb-a'

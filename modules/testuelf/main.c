@@ -1,4 +1,6 @@
 #include "corelib/core.h"
+#include "corelib/rb.h"
+#include "main.h"
 
 uint32 readtimer() {
 	uint32			*mmio;
@@ -27,6 +29,14 @@ int main() {
 	addr = valloc(1);
 	printf("-----------------addr:%x\n", addr);
 	vfree(addr, 1);
+	
+	sz = sizeof(pkt);
+	pkt[0] = KMSG_SENDMESSAGE;
+	for (x = 1; x < 32; ++x) {
+		pkt[x] = x; 
+	}
+	rb_write_nbio(&__corelib_tx, &pkt[0], sz);
+	notifykserver();
 	
 	for (;;) {
 		printf("TESTUELF BEFORE SLEEP\n");

@@ -1,6 +1,10 @@
 #include "core.h"
 #include "rb.h"
 
+#ifdef KERNEL
+#define printf kprintf
+#endif
+
 int rb_write_nbio(RBM *rbm, void *p, uint32 sz) {
 	RB volatile		*rb;
 	int32			r;

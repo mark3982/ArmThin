@@ -147,7 +147,7 @@ void k_heapBMSet(KHEAPBM *heap, uintptr ptr, uintptr size, uint8 rval) {
 	uint32				max;
 	
 	KCCENTER(&heap->lock);
-	
+	kprintf("k_heapBMSet; heap:%x ptr:%x size:%x\n", heap, ptr, size);
 	for (b = heap->fblock; b; b = b->next) {
 		/* check if region effects block */
 		if (
@@ -188,6 +188,7 @@ void k_heapBMSet(KHEAPBM *heap, uintptr ptr, uintptr size, uint8 rval) {
 			}
 			
 			/* update free block count */
+			kprintf("ei:%x bi:%x\n", ei, bi);
 			if (rval == 0) {
 				b->used -= ei - bi;
 			} else {

@@ -110,21 +110,33 @@ uintptr kvmm2_rndup(uintptr sz) {
 }
 
 uint32 kvmm2_revinc(uintptr v) {
-	uint32		val;
+	uint32		val;	
+	KSTATE		*ks;
+	
+	ks = GETKS();
+	
+	VMMKCCENTER(&ks->revlock);
 	val = kvmm2_revget(v, 1) + 1;
 	kvmm2_revset(v, val, 1);
+	VMMKCCEXIT(&ks->revlock);
 	return val;
 }
 
 uint32 kvmm2_revdec(uintptr v) {
 	uint32		val;
+	KSTATE		*ks;
 	
+	ks = GETKS();
+	
+	VMMKCCENTER(&ks->revlock);
 	val = kvmm2_revget(v, 1);
 	if (val == 0) {
+		VMMKCCEXIT(&ks->revlock);
 		return val;
 	}
 	--val;
 	kvmm2_revset(v, val, 1);
+	VMMKCCEXIT(&ks->revlock);
 	return val;
 }
 

@@ -53,6 +53,7 @@ ifcnt = 0
 forcnt = 0
 whilecnt = 0
 comcnt = 0
+codestates = 0
 
 def readsblock(path):
 	fd = open(path, 'r')
@@ -188,7 +189,7 @@ def grabnested(toks, x):
 	return (out, x)
 	
 def process(file):
-	global forcnt, whilecnt, ifcnt, assigncnt
+	global forcnt, whilecnt, ifcnt, assigncnt, codestates
 
 	d = readfile(file)
 	
@@ -202,6 +203,8 @@ def process(file):
 	while x < len(toks):
 		if toks[x] == '=' and toks[x - 1] != '=' and toks[x + 1] != '=':
 			assigncnt = assigncnt + 1
+		if toks[x] == ';':
+			codestates = codestates + 1
 		x = x + 1
 			
 	x = 0;
@@ -253,7 +256,9 @@ def gendir(meta, cfg, dir, level = 0):
 		# handle directories
 		if os.path.isdir('%s/%s' % (dir, node)):
 			print('%sgoing into %s' % (level * levelpad, node))
-			gendir(meta, cfg, '%s/%s' % (dir, node), level = level + 1)
+			if node == 'boards':
+				print('inside boards')
+				gendir(meta, cfg, '%s/%s' % (dir, node), level = level + 1)
 		# handle different file types
 		ext = node[node.find('.') + 1:]
 		base = node[0:node.find('.')]
@@ -337,3 +342,4 @@ print('whilecnt', whilecnt)
 print('ifcnt', ifcnt)
 print('comcnt', comcnt)
 print('assigncnt', assigncnt)
+print('codestates', codestates)

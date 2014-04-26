@@ -652,6 +652,12 @@ void k_exphandler(uint32 lr, uint32 type) {
 	//asm("mov %[var], sp\n" : [var]"=r" (r0));
 	//kprintf("SPSPSPSP:%x type:%x\n", r0, type);
 	
+	if (type == ARM4_XRQ_FIQ) {
+		for (;;) {
+			kprintf("PANIC: NOT EXPECTING FIQ\n");
+		}
+	}
+	
 	if (type == ARM4_XRQ_IRQ) {
 		if (kboardCheckAndClearTimerINT()) {			
 			/* update current time */
@@ -819,6 +825,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 				cs->cthread->flags |= KTHREAD_WAKINGUPKTHREAD;
 				/* add signal for thread (internal locking per cpu) */
 				mwsrgla_add(&ks->ktsignal, (uintptr)cs->cthread);
+				kprintf("SYSCALL KERNELMSG\n");
 				break;
 			default:
 				break;
@@ -1151,7 +1158,7 @@ int kthread_threadverify(KPROCESS *tarproc, KTHREAD *tarth) {
 void kthread(KTHREAD *myth) {
 	uint32			x, y;
 	KPROCESS		*proc;
-	KTHREAD			*th;
+	KTHREAD			*th, *_th;
 	KSTATE			*ks;
 	uint32			pkt[32];
 	uint32			sz;
@@ -1201,13 +1208,28 @@ void kthread(KTHREAD *myth) {
 			for (sz = sizeof(pkt); rb_read_nbio(&th->ktx, &pkt[0], &sz, 0); sz = sizeof(pkt)) {
 				kprintf("[kthread] got pkt\n");
 				/* check packet type */
-				switch (pkt[0] & 0xff) {
-					case 0:
+				switch (pkt[0]) {
+					case KMSG_SENDMESSAGE:
+						kprintf("[kthread] send message to process:%x thread:%x\n", pkt[2], pkt[3]);
 						/* send message to another process:thread */
-						if (kthread_threadverify((KPROCESS*)pkt[1], (KTHREAD*)pkt[2])) {
+						if (kthread_threadverify((KPROCESS*)pkt[2], (KTHREAD*)pkt[3])) {
+							// pkt[0] - type
+							// pkt[1] - request-id
+							// pkt[2] - process id
+							// pkt[3] - thread id
+							// pkt[4-31] - payload
+						
 							/* add message to ring buffer */
+							_th = (KTHREAD*)pkt[3];
+							pkt[0] = KMSG_THREADMESSAGE;
+							sz = sizeof(pkt);
+							rb_write_nbio(&_th->krx, &pkt[0], sz);
 						} else {
 							/* send message back for error */
+							kprintf("[kthread] send failed - no proc/thread match\n");
+							pkt[0] = KMSG_SENDFAILED;
+							sz = sizeof(pkt);
+							rb_write_nbio(&th->krx, &pkt[0], sz);
 						}
 						break;
 					case 1:
@@ -1216,13 +1238,14 @@ void kthread(KTHREAD *myth) {
 					case 2:
 						/* enumerate services */
 						break;
-					case 3:
+					case KMSG_REQSHARED:
+						// 
 						/* request shared memory from another process:thread */
 						/* check for existing request (only one at a time!) */
 						/* add request entry */
 						/* send message to target process:thread */
 						break;
-					case 4:
+					case KMSG_ACPSHARED:
 						/* accept shared memory request from another process */
 						/* grab process:thread list modify lock (can be read but not modified) */
 							/* find request entry */
@@ -1231,11 +1254,8 @@ void kthread(KTHREAD *myth) {
 						/* grab vmm lock on both processes (vmm for processes can not be modified) */
 						/* release vmm lock and release process:thread list modify lock */
 						break;
-					case 5:
-						/* terminate (this thread) or any other thread */
-						break;
-					case 6:
-						/* terminate (this process) or any other process */
+					default:
+						kprintf("[kthread] unknown message type:%x size:%x\n", pkt[0], sz);
 						break;
 				}
 			}

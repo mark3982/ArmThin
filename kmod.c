@@ -12,8 +12,10 @@ KATTMOD *kPkgGetNextMod(KATTMOD *mod) {
 	
 	/* make sure there actually exists another module after this one */
 	if (n->signatureA != 0x12345678 || ~n->signatureA != n->signatureB) {
+		kprintf("next mod not found\n");
 		return 0;
 	}
+	
 	return n;
 }
 
@@ -38,12 +40,13 @@ uintptr kPkgGetTotalLength() {
 KATTMOD *kPkgGetFirstMod() {
 	uint32		*p;
 	uint32		x;
+	uintptr		_p;
 	
-	/* get end of our image */
-	p = (uint32*)&kPkgGetNextMod;
+	_p = (uintptr)&_EOI - 4 * 20;
+	_p = _p & ~0x3;
 	
 	/* find signature of first module */
-	for (x = 0; (uintptr)&p[x] < (uintptr)&_EOI + 0x1000; ++x) {
+	for (p = (uint32*)_p, x = 0; x < 256; ++x) {
 		/*
 			This is a very tricky situation. We do not want the compiler
 			to emit these sequence of bytes neither through an immediate
@@ -55,6 +58,5 @@ KATTMOD *kPkgGetFirstMod() {
 		}
 	}
 	
-	kprintf("could not find first mod\n");
 	return 0;
 }

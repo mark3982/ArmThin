@@ -120,6 +120,18 @@ void kprintf(const char *fmt, ...) {
 	__builtin_va_end(argp);
 }
 
+/* helps when debugging corelib since it uses printf */
+void printf(const char *fmt, ...) {
+	char					buf[128];
+	__builtin_va_list		argp;
+	__builtin_va_start(argp, fmt);
+	//ksprintf(buf, "fmt:%x\n", (char*)fmt);
+	//kserdbg_puts(buf);
+	__ksprintf(buf, fmt, argp);
+	kserdbg_puts(buf);
+	__builtin_va_end(argp);
+}
+
 void stackprinter() {
 	uint32		tmp;
 	uint32		*s;

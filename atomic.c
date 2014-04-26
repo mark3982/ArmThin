@@ -9,8 +9,8 @@
 	but modified heavily..
 */
 uint32 katomic_locktake(volatile uint32 *ptr, uint32 need_value, uint32 new_value) {
-	uint32		reloop;
-	uint32		old_value;
+	uint32 volatile		reloop;
+	uint32 volatile		old_value;
 	
 	reloop = 1;
 	// old_value = LDREX(ptr)
@@ -35,7 +35,7 @@ int katomic_lockspin(volatile uint32 *ptr, uint32 id) {
 }
 
 int katomic_lockspin_yield(volatile KATOMIC_CCLOCK *ptr, uint32 id) {
-	uint32			cyclecnt;
+	uint32 volatile cyclecnt;
 
 	cyclecnt = 0;
 	while (!katomic_locktake(&ptr->lock, 0, id) || ptr->lock != id) {
@@ -51,7 +51,7 @@ int katomic_lockspin_yield(volatile KATOMIC_CCLOCK *ptr, uint32 id) {
 }
 
 int katomic_lockspin_wfe(volatile KATOMIC_CCLOCK *ptr, uint32 id) {
-	uint32			cyclecnt;
+	uint32 volatile cyclecnt;
 
 	cyclecnt = 0;
 	while (!katomic_locktake(&ptr->lock, 0, id) || ptr->lock != id) {

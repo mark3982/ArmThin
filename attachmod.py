@@ -20,14 +20,20 @@ def attach(srcf, dstf, typf):
 	else:
 		pad = 0
 
-	#print('[ATTACHMOD] %s [%s bytes] ----> %s' % (srcf, sz, dstf))
-
 	dfd = open(dstf, "r+b")
 	dfd.seek(0, 2)
+	psz = dfd.tell()
+	ppad = psz & 3
+	if ppad > 0:
+		ppad = 4 - ppad
+	else:
+		ppad = 0
+	dfd.write(b'B' * ppad)
 	dfd.write(struct.pack('IIII', sz + pad, 0x12345678, 0xedcba987, int(typf)))
 	dfd.write(sd)
+	#print('sz+pad=%s' % (sz + pad))
 	if pad > 0:
 		dfd.write(b'A' * pad)
+	#print('[ATTACHMOD] spad:%s tpad:%s %s [%s bytes] ----> %s (old sz:%s new sz:%s)' % (pad, ppad, srcf, sz, dstf,  hex(psz), hex(dfd.tell())))
 	dfd.close()
-	
 	return sz

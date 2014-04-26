@@ -6,7 +6,7 @@
 extern RBM				__corelib_rx;
 extern RBM				__corelib_tx;
 
-
+void notifykserver();
 int sleep(uint32 timeout);
 void yield();
 uint32 getTicksPerSecond();

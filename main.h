@@ -4,7 +4,6 @@
 #include "config.h"
 #include "vmm.h"
 #include "kheap.h"
-#include "dbgout.h"
 #include "corelib/rb.h"
 #include "atomic.h"
 
@@ -77,6 +76,12 @@
 #define KTHREAD_KIDLE				0x04
 #define KTHREAD_DEAD				0x08
 #define KTHREAD_WAKINGUPKTHREAD		0x10
+
+#define KMSG_SENDMESSAGE		0
+#define KMSG_SENDFAILED			1
+#define KMSG_THREADMESSAGE		2
+#define KMSG_REQSHARED			3
+#define KMSG_ACPSHARED			4
 
 #define KPROCESS_DEAD			0x1
 	

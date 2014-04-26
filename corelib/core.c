@@ -1,5 +1,6 @@
 #include "core.h"
 #include "rb.h"
+#include "main.h"
 
 #define SERIAL_BASE 0xa0000000
 #define SERIAL_FLAG_REGISTER 0x18
@@ -174,6 +175,10 @@ int sleep(uint32 timeout) {
 	result = __sleep(timeout);
 	/* convert from ticks */
 	return result / tps;
+}
+
+void notifykserver() {
+	asm("swi %[code]" : : [code]"i" (KSWI_KERNELMSG));
 }
 
 void yield() {
