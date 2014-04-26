@@ -17,6 +17,17 @@ struct _RBME {
 
 typedef struct _RBME RBM;
 
+typedef int (*KATOMIC_LOCKSPIN8NR)(volatile uint8 *ptr, uint8 id);
+
+typedef struct _ERH {
+	void				*er;			
+	uint32				tsz;			/* total size */
+	uint32				esz;			/* entry size */
+	uint32				ecnt;			/* total entries */
+	uint32				mcnt;			/* entries used by map */
+	KATOMIC_LOCKSPIN8NR	lockfp;			/* locking function pointer */
+} ERH;
+
 /*
 	the writer can write if r==w
 	the writer has to wait if w < r and sz > (r - w)
@@ -41,4 +52,9 @@ typedef struct _RBME RBM;
 int rb_write_nbio(RBM *rbm, void *p, uint32 sz);
 int rb_read_nbio(RBM *rbm, void *p, uint32 *sz, uint32 *advance);
 int rb_read_bio(RBM *rbm, void *p, uint32 *sz, uint32 *advance, uint32 timeout);
+
+int er_init(ERH * erh, void *data, uint32 tsz, uint32 esz, KATOMIC_LOCKSPIN8NR lockfp);
+int er_ready(ERH *erh, void *data, uint32 tsz, uint32 esz, KATOMIC_LOCKSPIN8NR lockfp);
+int er_write_nbio(ERH *erh, void *p, uint32 sz);
+int er_read_nbio(ERH *erh, void *p, uint32 *sz);
 #endif

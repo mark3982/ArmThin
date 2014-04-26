@@ -8,7 +8,7 @@
 	
 	but modified heavily..
 */
-uint32 katomic_locktake(volatile uint32 *ptr, uint32 need_value, uint32 new_value) {
+uint32 katomic_locktake32(volatile uint32 *ptr, uint32 need_value, uint32 new_value) {
 	uint32 volatile		reloop;
 	uint32 volatile		old_value;
 	
@@ -30,15 +30,15 @@ uint32 katomic_locktake(volatile uint32 *ptr, uint32 need_value, uint32 new_valu
 	return reloop == 0;
 }
 
-int katomic_lockspin(volatile uint32 *ptr, uint32 id) {
-	while (!katomic_locktake(ptr, 0, id));
+int katomic_lockspin32(volatile uint32 *ptr, uint32 id) {
+	while (!katomic_locktake32(ptr, 0, id));
 }
 
 int katomic_lockspin_yield(volatile KATOMIC_CCLOCK *ptr, uint32 id) {
 	uint32 volatile cyclecnt;
 
 	cyclecnt = 0;
-	while (!katomic_locktake(&ptr->lock, 0, id) || ptr->lock != id) {
+	while (!katomic_locktake32(&ptr->lock, 0, id) || ptr->lock != id) {
 		asm("swi %[code]" : : [code]"i" (KSWI_YEILD));
 		cyclecnt++;
 		if (cyclecnt > 400) {
@@ -50,11 +50,22 @@ int katomic_lockspin_yield(volatile KATOMIC_CCLOCK *ptr, uint32 id) {
 	ptr->cnt++;
 }
 
+typedef int (*KATOMIC_LOCKSPIN8NR)(volatile uint8 *ptr, uint8 id);
+
+/*
+	non-re-entrant lock for kernel space
+*/
+int katomic_lockspin_wfe8nr(volatile uint8 *ptr, uint8 id) {
+	while (!katomic_locktake8(ptr, 0, id) || *ptr != id) {
+		asm volatile ("wfe");
+	}
+}
+
 int katomic_lockspin_wfe(volatile KATOMIC_CCLOCK *ptr, uint32 id) {
 	uint32 volatile cyclecnt;
 
 	cyclecnt = 0;
-	while (!katomic_locktake(&ptr->lock, 0, id) || ptr->lock != id) {
+	while (!katomic_locktake32(&ptr->lock, 0, id) || ptr->lock != id) {
 		asm volatile ("wfe");
 		cyclecnt++;
 		if (cyclecnt > 200) {
@@ -72,7 +83,7 @@ void katomic_ccenter(volatile uint32 *ptr) {
 	
 	cpuid = boardGetCPUID() + 1;			/* get our cpu ID */
 	/* +1 because CPU0 is value 0 which is released value */
-	katomic_lockspin(ptr, cpuid);			/* spin until we grab the lock */
+	katomic_lockspin32(ptr, cpuid);			/* spin until we grab the lock */
 }
 
 void katomic_ccenter_yield(volatile KATOMIC_CCLOCK *ptr) {

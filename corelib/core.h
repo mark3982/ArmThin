@@ -3,8 +3,8 @@
 #include "stdtypes.h"
 #include "rb.h"
 
-extern RBM				__corelib_rx;
-extern RBM				__corelib_tx;
+extern ERH				__corelib_rx;
+extern ERH				__corelib_tx;
 
 void notifykserver();
 int sleep(uint32 timeout);

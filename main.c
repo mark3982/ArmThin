@@ -625,6 +625,67 @@ int mwsr_add(MWSR *mwsr,  uintptr v) {
 	return 1;
 }
 
+static void kswi_termprocess() {
+	KSTATE				*ks;
+	KCPUSTATE			*cs;
+	KPROCESS			*proc;
+	KTHREAD				*th, *_th;
+	
+	ks = GETKS();
+	cs = GETCS();
+
+	/* unlink process and threads, but keep modify pointer so
+	   scheduler can grab next thread */
+	KCCENTER(&ks->schedlock);
+	proc = cs->cproc;
+	proc->flags |= KPROCESS_DEAD;
+	
+	/* add dead process to be deallocated */
+	mwsr_add(&ks->dealloc, (uintptr)proc);
+	
+	/* should schedule a thread from the next process */
+	ksched();
+	/* restore pointer */
+	th->next = _th;
+	/* cycle through threads releasing resources */
+	for (th = proc->threads; th; th = _th) {
+		_th = th->next;
+		/* add thread to either dealloc or deallocw */
+		mwsr_add(&ks->dealloc, (uintptr)th);
+		th->flags |= KTHREAD_DEAD;
+	}
+	/* free process resources */
+	if (!kprocfree(proc)) {
+		PANIC("ERROR-FREEING-PROC-RESOURCES");
+	}
+	/* release heap memory */
+	kfree(proc);
+	KCCEXIT(&ks->schedlock);;
+
+}
+
+static void kswi_termthread() {
+	KPROCESS			*proc;
+	KTHREAD				*th;
+	KSTATE				*ks;
+	KCPUSTATE			*cs;
+	
+	ks = GETKS();
+	cs = GETCS();
+
+	KCCENTER(&ks->schedlock);
+	proc = cs->cproc;
+	th = cs->cthread;
+	/* should schedule a thread from the next process */
+	ksched();
+	/* now unlink and free thread resources */
+	ll_rem((void**)&proc->threads, th);
+	mwsr_add(&ks->dealloc, (uintptr)th);
+	th->flags |= KTHREAD_DEAD;
+	KCCEXIT(&ks->schedlock);
+	return;
+}
+
 //__attribute__((optimize("O0")))
 //__attribute__ ((noinline))
 void k_exphandler(uint32 lr, uint32 type) {
@@ -704,45 +765,10 @@ void k_exphandler(uint32 lr, uint32 type) {
 		//stk[-13] = R1;
 		switch (swi) {
 			case KSWI_TERMPROCESS:
-				/* unlink process and threads, but keep modify pointer so
-				   scheduler can grab next thread */
-				KCCENTER(&ks->schedlock);
-				proc = cs->cproc;
-				proc->flags |= KPROCESS_DEAD;
-				
-				/* add dead process to be deallocated */
-				mwsr_add(&ks->dealloc, (uintptr)proc);
-				
-				/* should schedule a thread from the next process */
-				ksched();
-				/* restore pointer */
-				th->next = _th;
-				/* cycle through threads releasing resources */
-				for (th = proc->threads; th; th = _th) {
-					_th = th->next;
-					/* add thread to either dealloc or deallocw */
-					mwsr_add(&ks->dealloc, (uintptr)th);
-					th->flags |= KTHREAD_DEAD;
-				}
-				/* free process resources */
-				if (!kprocfree(proc)) {
-					PANIC("ERROR-FREEING-PROC-RESOURCES");
-				}
-				/* release heap memory */
-				kfree(proc);
-				KCCEXIT(&ks->schedlock);;
+				kswi_termprocess();
 				break;
 			case KSWI_TERMTHREAD:
-				KCCENTER(&ks->schedlock);
-				proc = cs->cproc;
-				th = cs->cthread;
-				/* should schedule a thread from the next process */
-				ksched();
-				/* now unlink and free thread resources */
-				ll_rem((void**)&proc->threads, th);
-				mwsr_add(&ks->dealloc, (uintptr)th);
-				th->flags |= KTHREAD_DEAD;
-				KCCEXIT(&ks->schedlock);
+				kswi_termthread();
 				break;
 			case KSWI_VALLOC:
 				/* allocate range of pages and store result in R0 */
@@ -859,6 +885,35 @@ void k_exphandler(uint32 lr, uint32 type) {
 				((uint32 volatile*)stk)[-14] = (uint32)kmalloc(stk[-14]);
 				kprintf("KSWI_TKMALLOC %x\n", stk[-14]);
 				break;
+			case KSWI_TKSHAREMEM:
+			{
+				uint32				x;
+				uintptr				out;
+				uintptr				phy;
+				uintptr				addr;
+				uintptr				pcnt;
+				KPROCESS			*acceptor;
+				KPROCESS			*requestor;
+				
+				acceptor = (KPROCESS*)stk[-14];
+				requestor = (KPROCESS*)stk[-13];
+				addr = stk[-13];
+				pcnt = stk[-12];
+				
+				/* find free range for acceptor */
+				if (!kvmm2_findregion(&acceptor->vmm, pcnt, KMEMSIZE, 0, 0, &out)) {
+					((uint32 volatile*)stk)[-14] = 0;
+					break;
+				}
+				
+				for (x = 0; x < pcnt; ++x) {
+					kvmm2_getphy(&requestor->vmm, addr, &phy);
+					kvmm2_mapsingle(&acceptor->vmm, out + x * 0x1000, phy, TLB_C_AP_FULLACCESS);
+				}
+				
+				((uint32 volatile*)stk)[-14] = 1;
+				break;
+			}
 			default:
 				break;
 		}
@@ -1030,18 +1085,24 @@ KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	
 	/* --- ALLOC RING BUFFER INTO KERNEL SERVER THREAD PROCESS FIRST --- */
 	kvmm2_allocregion(&ks->kservproc->vmm, 1, KMEMSIZE, 0, TLB_C_AP_PRIVACCESS, &out);
-	kprintf("KSERV VIRTPAGE:%x\n", out);
-	th->krx.rb = (RB*)out;
-	th->krx.sz = (KVIRPAGESIZE >> 1) - sizeof(RB);			/* should be 2KB */
-	th->ktx.rb = (RB*)(out + (KVIRPAGESIZE >> 1));
-	th->ktx.sz = (KVIRPAGESIZE >> 1) - sizeof(RB);			/* should be 2KB */
+
+	kvmm2_getphy(&ks->vmm, (uintptr)ks->kservproc->vmm.table, &page);
+	oldpage = arm4_tlbget1();
+	arm4_tlbset1(page);
+	asm("mcr p15, #0, r0, c8, c7, #0");
+	
+	er_init(&th->krx, (void*)out, KVIRPAGESIZE >> 1, 16 * 4, 0);
+	er_init(&th->ktx, (void*)(out + (KVIRPAGESIZE >> 1)), KVIRPAGESIZE >> 1, 16 * 4, &katomic_lockspin_wfe8nr);
+	
+	arm4_tlbset1(oldpage);
+	asm("mcr p15, #0, r0, c8, c7, #0");
 	
 	/* --- MAP RING BUFFER INTO USERSPACE OF THREAD PROCESS */
 	/* find unused appropriate sized region in thread's address space */
 	kvmm2_findregion(&proc->vmm, 1, KMEMSIZE, 0, 0, &out);
 	//kprintf("VIRTPAGE:%x\n", out);
 	/* map that region to the same physical pages used in kernel server address space */
-	kvmm2_getphy(&ks->kservproc->vmm, (uintptr)th->krx.rb, &out2);
+	kvmm2_getphy(&ks->kservproc->vmm, (uintptr)th->krx.er, &out2);
 	//kprintf("PHYPAGE:%x\n", out2);
 	kvmm2_mapsingle(&proc->vmm, out, out2, TLB_C_AP_FULLACCESS);
 	/* set userspace pointers for thread to appropriate values */
@@ -1055,10 +1116,7 @@ KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	arm4_tlbset1(page);
 	/* flush TLB */
 	asm("mcr p15, #0, r0, c8, c7, #0");
-	
-	/* clear RB structures */
-	memset(th->urx, 0, sizeof(RB));
-	memset(th->utx, 0, sizeof(RB));
+
 	
 	/* pass the arguments */
 	th->r0 = (uint32)th->urx;
@@ -1220,6 +1278,29 @@ int kthread_threadverify(KPROCESS *tarproc, KTHREAD *tarth) {
 	return 0;
 }
 
+int tksharememory(KPROCESS *acceptor, KPROCESS *requestor, uintptr addr, uintptr pcnt) {
+	int				result;
+
+	asm volatile (
+		"push {r0, r1, r2, r3}\n"
+		"mov r0, %[acceptor]\n"
+		"mov r1, %[requestor]\n"
+		"mov r2, %[addr]\n"
+		"mov r3, %[pcnt]\n"
+		"swi %[code]\n"
+		"mov %[result], r0\n"
+		"pop {r0, r1, r2, r3}\n"
+		: [result]"=r" (result)
+		: [acceptor]"r" (acceptor),
+		  [requestor]"r" (requestor),
+		  [addr]"r" (addr),
+		  [pcnt]"r" (pcnt),
+		  [code]"i" (KSWI_TKSHAREMEM)
+	);
+	return result;
+}
+
+
 void kthread(KTHREAD *myth) {
 	uint32			x, y;
 	KPROCESS		*proc;
@@ -1270,7 +1351,7 @@ void kthread(KTHREAD *myth) {
 			th->flags &= ~KTHREAD_WAKINGUPKTHREAD;
 			
 			kprintf("[kthread] reading RB for thread:%x[%s]\n", th, th->dbgname);
-			for (sz = sizeof(pkt); rb_read_nbio(&th->ktx, &pkt[0], &sz, 0); sz = sizeof(pkt)) {
+			for (sz = sizeof(pkt); er_read_nbio(&th->ktx, &pkt[0], &sz); sz = sizeof(pkt)) {
 				kprintf("[kthread] got pkt\n");
 				/* check packet type */
 				switch (pkt[0]) {
@@ -1291,13 +1372,13 @@ void kthread(KTHREAD *myth) {
 							/* put sender's process:thread id in */
 							pkt[2] = (uint32)th->proc;
 							pkt[3] = (uint32)th;
-							rb_write_nbio(&_th->krx, &pkt[0], sz);
+							er_write_nbio(&_th->krx, &pkt[0], sz);
 						} else {
 							/* send message back for error */
 							kprintf("[kthread] send failed - no proc/thread match\n");
 							pkt[0] = KMSG_SENDFAILED;
 							sz = sizeof(pkt);
-							rb_write_nbio(&th->krx, &pkt[0], sz);
+							er_write_nbio(&th->krx, &pkt[0], sz);
 						}
 						break;
 					case KMSG_CREATETHREAD:
@@ -1328,26 +1409,100 @@ void kthread(KTHREAD *myth) {
 						tkaddthread(th->proc, _th);
 						break;
 					case KMSG_REGSERVICE:
+						// pkt[0] - type
+						// pkt[1] - RID
+						// pkt[2] - service id
+						// pkt[3] - process id
+						// pkt[4] - thread id
 						/* register service */
+						if (!(th->proc->flags & KPROCESS_SYSTEM)) {
+							pkt[0] = KMSG_REGSERVICEFAILD;
+							er_write_nbio(&th->krx, &pkt[0], sz);
+						} else {
+							pkt[0] = KMSG_REGSERVICEOK;
+							ks->ssr_proc[pkt[2] & 3] = pkt[3];
+							ks->ssr_th[pkt[2] & 3] = pkt[4];
+							er_write_nbio(&th->krx, &pkt[0], sz);							
+						}
 						break;
-					case KMSG_ENUMSERVICES:
+					case KMSG_ENUMSERVICE:
+						// request:
+						// 	pkt[0] - type
+						// 	pkt[1] - rid
+						// 	pkt[2] - service id
+						// replay:
+						// 	pkt[0] - type
+						//  pkt[1] - rid
+						//  pkt[2] - service id
+						//  pkt[3] - process id
+						//  pkt[4] - thread id
 						/* enumerate services */
+						pkt[0] = KMSG_ENUMSERVICEREPLY;
+						pkt[3] = ks->ssr_proc[pkt[2] & 3];
+						pkt[4] - ks->ssr_th[pkt[2] & 3];
+						er_write_nbio(&th->krx, &pkt[0], sz);
 						break;
 					case KMSG_REQSHARED:
-						// 
-						/* request shared memory from another process:thread */
-						/* check for existing request (only one at a time!) */
-						/* add request entry */
-						/* send message to target process:thread */
+						// pkt[0] - type
+						// pkt[1] - RID
+						// pkt[2] - memory offset
+						// pkt[3] - page count
+						// pkt[4] - target process
+						// pkt[5] - target thread
+						
+						/* save for verification (to prevent expoiting) */
+						if (kthread_threadverify((KPROCESS*)pkt[4], (KTHREAD*)pkt[5])) {
+							th->shreq_memoff = pkt[2];
+							th->shreq_pcnt = pkt[3];
+							/* reply we are good */
+							pkt[0] = KMSG_REQSHAREDOK;
+							er_write_nbio(&th->krx, &pkt[0], sz);
+							/* send request to target */
+							pkt[0] = KMSG_REQSHARED;
+							pkt[4] = (uintptr)th->proc;
+							pkt[5] = (uintptr)th;
+							_th = (KTHREAD*)pkt[5];
+							er_write_nbio(&_th->krx, &pkt[0], sz);
+						} else {
+							pkt[0] = KMSG_REQSHAREDFAIL;
+							er_write_nbio(&th->krx, &pkt[0], sz);
+						}
 						break;
 					case KMSG_ACPSHARED:
-						/* accept shared memory request from another process */
-						/* grab process:thread list modify lock (can be read but not modified) */
-							/* find request entry */
-								/* map memory to process that is accepting request */
-								/* increment ref count on physical pages */
-						/* grab vmm lock on both processes (vmm for processes can not be modified) */
-						/* release vmm lock and release process:thread list modify lock */
+						// pkt[0] - type
+						// pkt[1] - rid
+						// pkt[2] - address
+						// pkt[3] - page count
+						// pkt[4] - target process
+						// pkt[5] - target thread
+						/* double check process:thread exist and active request is outstanding */
+						if (kthread_threadverify((KPROCESS*)pkt[4], (KTHREAD*)pkt[5])) {
+							_th = (KTHREAD*)pkt[5];
+							if (!pkt[2] && !pkt[3] && pkt[2] == _th->shreq_memoff && pkt[3] == _th->shreq_pcnt) {
+								tksharememory(th->proc, (KPROCESS*)pkt[4], pkt[2], pkt[3]);
+								
+								/* let them know it succeded and who for */
+								pkt[0] = KMSG_ACPSHAREDOK;
+								pkt[6] = pkt[4];
+								pkt[7] = pkt[5];
+								pkt[4] = (uintptr)th->proc;
+								pkt[5] = (uintptr)th;
+								er_write_nbio(&_th->krx, &pkt[0], sz);
+								
+								/* let them know it succeded and let other end know */
+								pkt[4] = pkt[6];
+								pkt[5] = pkt[7];
+								er_write_nbio(&th->krx, &pkt[0], sz);
+							} else {
+								/* it failed because request was not there */
+								pkt[0] = KMSG_ACPSHAREDFAIL;
+								er_write_nbio(&th->krx, &pkt[0], sz);
+							}
+						} else {
+							/* let them know it failed */
+							pkt[0] = KMSG_ACPSHAREDFAIL;
+							er_write_nbio(&th->krx, &pkt[0], sz);
+						}
 						break;
 					default:
 						kprintf("[kthread] unknown message type:%x size:%x\n", pkt[0], sz);
@@ -1497,6 +1652,8 @@ void start() {
 			/* create new process */
 			process = (KPROCESS*)kmalloc(sizeof(KPROCESS));
 			memset(process, 0, sizeof(KPROCESS));
+			/* system processes (loaded with kernel) */
+			process->flags |= KPROCESS_SYSTEM;
 			ll_add((void**)&ks->procs, process);
 			/* will create thread in process */
 			th = kelfload(process, (uintptr)&m->slot[0], m->size);

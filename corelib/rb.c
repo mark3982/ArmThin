@@ -1,9 +1,107 @@
 #include "core.h"
 #include "rb.h"
+#include <atomic.h>
 
 #ifdef KERNEL
 #define printf kprintf
 #endif
+
+#define ROUNDUPINTDIV(a, b) ((a / b) * b < a ? (a / b) + 1 : a / b)
+
+int er_ready(ERH *erh, void *data, uint32 tsz, uint32 esz, KATOMIC_LOCKSPIN8NR lockfp) {		
+	uint32			ecnt;
+	uint32			mcnt;
+	
+	ecnt = tsz / esz;
+	mcnt = ROUNDUPINTDIV(ecnt, esz);
+	
+	erh->lockfp = lockfp;
+	erh->er = data;
+	erh->tsz = tsz;
+	erh->esz = esz;
+	erh->ecnt = ecnt;
+	erh->mcnt = mcnt;
+	
+	return 1;
+}
+
+int er_init(ERH * erh, void *data, uint32 tsz, uint32 esz, KATOMIC_LOCKSPIN8NR lockfp) {
+	uint8 volatile	*map;
+	uint32			x;
+
+	if (!er_ready(erh, data, tsz, esz, lockfp)) {
+		return 0;
+	}
+	
+	map = (volatile uint8*)erh->er;
+	
+	/* permanently locked */
+	for (x = 0; x < erh->mcnt; ++x) {
+		map[x] = 0x7f;
+	}
+	
+	/* open for usage */
+	for (; x < erh->ecnt; ++x) {
+		map[x] = 0x00;
+	}
+	return 1;
+}
+
+int er_write_nbio(ERH *erh, void *p, uint32 sz) {
+	uint8			*map;
+	uint32			x, y;
+	uint8			*data;
+	
+	map = (uint8*)erh->er;
+	
+	if (!erh->lockfp) {
+		return -2;
+	}
+	
+	if (sz > erh->esz) {
+		return -1;
+	}
+	
+	/* find entry and lock it */
+	for (x = 0; x < erh->ecnt; ++x) {
+		/* try to lock it */
+		if (map[x] == 0 && erh->lockfp(&map[x], 1)) {
+			/* got lock, now write data */
+			data = (uint8*)((uintptr)erh->er + x * erh->esz);
+			for (y = 0; y < sz; ++y) {
+				data[y] = ((uint8*)p)[y];
+			}
+			/* set valid flag */
+			map[x] = map[x] | 0x80;
+			return 1;
+		}
+	}
+	
+	return 0;
+}
+
+int er_read_nbio(ERH *erh, void *p, uint32 *sz) {
+	uint32			x, y;
+	uint8			*map;
+	uint8			*data;
+	
+	map = (uint8*)erh->er;
+	for (x = 0; x < erh->ecnt; ++x) {
+		if (map[x] & 0x80) {
+			/* found entry, now copy out data */
+			data = (uint8*)((uintptr)erh->er + x * erh->esz);
+			for (y = 0; (y < *sz) && (y < erh->esz); ++y) {
+				((uint8*)p)[y] = data[y];
+			}
+			/* set entry as free */
+			map[x] = 0;
+			return 1;
+		}
+	}
+	
+	return 0;
+}
+
 
 int rb_write_nbio(RBM *rbm, void *p, uint32 sz) {
 	RB volatile		*rb;

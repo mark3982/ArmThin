@@ -4,7 +4,8 @@
 
 void testthread() {
 	for (;;) {
-		//printf("TEST THREAD\n");
+		printf("TEST THREAD\n");
+		sleep(5);
 	}
 }
 
@@ -38,8 +39,8 @@ int main() {
 	pkt[2] = (uintptr)&testthread;
 	pkt[3] = (uintptr)&stack[30];
 	pkt[4] = 0x12AA34BB;
-	//rb_write_nbio(&__corelib_tx, &pkt[0], sz);
-	//notifykserver();
+	er_write_nbio(&__corelib_tx, &pkt[0], 4 * 4);
+	notifykserver();
 	
 	for (;;) {
 		printf("TESTUELF BEFORE SLEEP\n");

@@ -21,7 +21,7 @@ class bcolors:
 	
 def executecmd(cwd, args, cmdshow=True):
 	if cmdshow:
-		print('\t\t%s' % args)
+		print('\t\t[%s] %s' % (cwd, args))
 	args = args.split(' ')
 
 	so, se = __executecmd(cwd, args)
@@ -79,7 +79,7 @@ def makeModule(cfg, dir, out):
 	# the -N switch has to prevent the file_offset in the elf32 from being
 	# equal to the VMA address which was bloating the modules way too much
 	# now they should be aligned to a 4K boundary or something similar
-	if executecmd(dir, '%s -T ../../module.link -L%s -N -o ../%s.mod ../../corelib/core.o ../../corelib/rb.o %s -lgcc' % (cfg['LD'], cfg['LIBGCCPATH'], out, objs), cmdshow=cfg['cmdshow']) is False:
+	if executecmd(dir, '%s -T ../../module.link -L%s -N -o ../%s.mod ../../atomicsh.o ../../corelib/core.o ../../corelib/rb.o %s -lgcc' % (cfg['LD'], cfg['LIBGCCPATH'], out, objs), cmdshow=cfg['cmdshow']) is False:
 		return False
 	#if executecmd(dir, '%s -S ../%s.mod ../%s.mod' % (cfg['OBJCOPY'], out, out), cmdshow=cfg['cmdshow']) is False:
 	#	return False
@@ -125,7 +125,12 @@ def make(cfg):
 	modules= cfg['modules']
 	# compile corelib
 	compileCoreLIB(cfg, dir = './corelib')
-		
+
+	# special object used by modules
+	# TODO: fix cant find CC executable
+	#if executecmd('./', '%s %s -c %s %s' % (cfg['CC'], cfg['CCFLAGS'], 'atomicsh.c', ''), cmdshow=cfg['cmdshow']) is False:
+	#	return False
+	
 	nodes = os.listdir(cfg['dirofmodules'])
 	# compile modules
 	for mdir in nodes:
@@ -158,8 +163,8 @@ def make(cfg):
 			bobjs = []
 			for o in objs:
 				bobjs.append('%s/%s/%s' % (cfg['dirofboards'], bdir, o))
-		
-	# compile kernel
+	
+		# compile kernel
 	if makeKernel(cfg, dir = './', out = cfg['kimg'], bobjs = bobjs) is False:
 		return False
 	
@@ -182,7 +187,7 @@ cfg['LD'] = 'arm-eabi-ld'
 cfg['AR'] = 'arm-eabi-ar'
 cfg['OBJCOPY'] = 'arm-eabi-objcopy'
 cfg['CCFLAGS'] = '-save-temps -save-temps=cwd -Os -mcpu=cortex-a9 -fno-builtin-printf -fno-builtin-sprintf -fno-builtin-memset'
-cfg['hdrpaths'] = ['../../', '../']
+cfg['hdrpaths'] = ['../../', '../', './corelib/']
 cfg['dirofboards'] = './boards'
 cfg['dirofmodules'] = './modules'
 cfg['board'] = 'realview-pb-a'

@@ -20,6 +20,11 @@ uint32 katomic_locktake(volatile uint32 *ptr, uint32 need_value, uint32 new_valu
 int katomic_lockspin(volatile uint32 *ptr, uint32 id);
 void katomic_ccenter(volatile uint32 *ptr);
 
+/* 8-bit lock for normal and kernel threads (seperate version) wfe=kernel yield=thread */
+uint32 katomic_locktake8(volatile uint8 *ptr, uint8 need_value, uint8 new_value);
+int katomic_lockspin_yield8nr(volatile uint8 *ptr, uint8 id);
+int katomic_lockspin_wfe8nr(volatile uint8 *ptr, uint8 id);
+
 /* for normal threads */
 void katomic_ccenter_yield(volatile KATOMIC_CCLOCK *ptr);
 void katomic_ccexit_yield(volatile KATOMIC_CCLOCK *ptr);

@@ -72,6 +72,7 @@
 #define KSWI_TERMTHREAD			108
 #define KSWI_TKMALLOC			109
 #define KSWI_TKADDTHREAD		110
+#define KSWI_TKSHAREMEM			111
 
 #define KTHREAD_SLEEPING			0x01
 #define KTHREAD_WAKEUP				0x02
@@ -86,9 +87,17 @@
 #define KMSG_ACPSHARED			4
 #define KMSG_CREATETHREAD		5
 #define KMSG_REGSERVICE			6
-#define KMSG_ENUMSERVICES		7
+#define KMSG_ENUMSERVICE		7
+#define KMSG_REGSERVICEFAILD	8
+#define KMSG_REGSERVICEOK		9
+#define KMSG_ENUMSERVICEREPLY	10
+#define KMSG_REQSHAREDFAIL		11
+#define KMSG_REQSHAREDOK		12
+#define KMSG_ACPSHAREDFAIL		13
+#define KMSG_ACPSHAREDOK		14
 
 #define KPROCESS_DEAD			0x1
+#define KPROCESS_SYSTEM			0x2
 	
 typedef struct _LL {
 	struct _LL			*next;
@@ -130,10 +139,14 @@ typedef struct _KTHREAD {
 	char				*dbgname;
 	
 	/* thread kernel communication */
-	RBM					krx;			/* kernel server thread address */
-	RBM					ktx;			/* kernel server thread address */
-	RB					*urx;			/* thread space address */
-	RB					*utx;			/* thread space address */
+	ERH					krx;			/* kernel server thread address */
+	ERH					ktx;			/* kernel server thread address */
+	void				*urx;			/* thread space address */
+	void				*utx;			/* thread space address */
+	
+	/* offering memory to share */
+	uintptr				shreq_memoff;	/* memory offset */
+	uintptr				shreq_pcnt;		/* page count */
 	
 	/* thread control */
 	uint32				timeout;			/* when to wakeup */
@@ -156,6 +169,10 @@ typedef struct _KPROCESS {
 	uint32				flags;
 } KPROCESS;
 
+typedef struct _K32PAIR {
+	
+} K32PAIR;
+
 typedef struct _KSTATE {
 	/* new process/thread support */
 	KPROCESS					*procs;
@@ -164,12 +181,18 @@ typedef struct _KSTATE {
 	KATOMIC_CCLOCK				schedlock;
 	KSTACK						runnable;
 	uint32						tswcycle;
-
+	
+	/* profiling stuff for scheduler (DEBUG STUFF) */
 	uint32						tmpsum;
 	uint32						tmpcnt;
 	uint32						tmplow;
+	
 	/* kernel thread dealloc */
 	MWSR						dealloc;
+	
+	/* system service registration (kthread uses this) */
+	uintptr						ssr_proc[4];
+	uintptr						ssr_th[4];
 	
 	/* kernel thread signal */
 	MWSRGLA						ktsignal;

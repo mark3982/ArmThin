@@ -134,15 +134,8 @@ void printf(const char *fmt, ...) {
 	__builtin_va_end(argp);
 }
 
-uint32 getTicksPerSecond() {
-	uint32			out;
-	asm volatile (
-			"push {r0}\n"
-			"swi #103 \n"
-			"mov %[out], r0 \n"
-			"pop {r0}\n"
-			: [out]"=r" (out));
-	return out;
+uint32 __attribute((naked)) getTicksPerSecond() {
+	asm volatile ("swi #103");
 }
 
 /*
@@ -154,11 +147,11 @@ uint32 getTicksPerSecond() {
 uint32 __sleep(uint32 timeout) {
 	uint32			result;
 	asm volatile (
-			"push {r0}\n"
+			"push {r0} \n"
 			"mov r0, %[in] \n"
 			"swi #101 \n"
 			"mov %[result], r0 \n"
-			"pop {r0}\n"
+			"pop {r0} \n"
 			: [result]"=r" (result) : [in]"r" (timeout));
 	return result;
 }
@@ -215,8 +208,8 @@ int rb_read_bio(RBM *rbm, void *p, uint32 *sz, uint32 *advance, uint32 timeout) 
 	}
 }
 
-RBM				__corelib_rx;
-RBM				__corelib_tx;
+ERH				__corelib_rx;
+ERH				__corelib_tx;
 
 void __attribute__((naked)) __start() {
 	asm("	__localloop:\n\
@@ -232,10 +225,10 @@ void _start(uint32 rxaddr, uint32 txaddr, uint32 txrxsz) {
 	/* setup meta data (outside shared memory / ring buffer) for protected fields */
 	printf("rxaddr:%x txaddr:%x txrxsz:%x\n", rxaddr, txaddr, txrxsz);
 	
-	__corelib_rx.sz = txrxsz;
-	__corelib_rx.rb = (RB*)rxaddr;
-	__corelib_tx.sz = txrxsz;
-	__corelib_tx.rb = (RB*)txaddr;
+	//int eb_ready(ERH *erh, void *data, uint32 tsz, uint32 esz);
+	
+	er_ready(&__corelib_rx, (void*)rxaddr, txrxsz, 16 * 4, 0);
+	er_ready(&__corelib_tx, (void*)txaddr, txrxsz, 16 * 4, &katomic_lockspin_yield8nr);
 	
 	printf("okokok\n");
 	/* wait to read arguments from ring buffer */

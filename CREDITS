@@ -11,3 +11,10 @@ from #osdev at irc.freenode.net
 	SirCmpwn, thePowersGang
 from osdev.org
 	Brendan, Combuster
+	
+special thanks:
+	geist		-		helping with:
+							performance and general help
+							cache and coherency
+	mrvn		-		helping with IPC and servicing HW interrupts
+	reavengray	-		helping with keeping me grounded in realiable/proven designs
