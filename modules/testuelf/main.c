@@ -1,12 +1,11 @@
-#include "corelib/core.h"
-#include "corelib/rb.h"
-#include "main.h"
+#include <corelib/core.h>
+#include <corelib/rb.h>
+#include <main.h>
 
-uint32 readtimer() {
-	uint32			*mmio;
-	
-	mmio = (uint32*)0xb0000200;
-	return mmio[1];
+void testthread() {
+	for (;;) {
+		//printf("TEST THREAD\n");
+	}
 }
 
 int main() {
@@ -17,6 +16,7 @@ int main() {
 	uint32			pkt[32];
 	uint32			sz;
 	uintptr			addr;
+	uint32			stack[32];
 	
 	smmio = (unsigned int*)0xa0000000;
 	
@@ -30,13 +30,16 @@ int main() {
 	printf("-----------------addr:%x\n", addr);
 	vfree(addr, 1);
 	
+	printf("testthread:%x\n", &testthread);
+	
 	sz = sizeof(pkt);
-	pkt[0] = KMSG_SENDMESSAGE;
-	for (x = 1; x < 32; ++x) {
-		pkt[x] = x; 
-	}
-	rb_write_nbio(&__corelib_tx, &pkt[0], sz);
-	notifykserver();
+	pkt[0] = KMSG_CREATETHREAD;
+	pkt[1] = 0x11223344;
+	pkt[2] = (uintptr)&testthread;
+	pkt[3] = (uintptr)&stack[30];
+	pkt[4] = 0x12AA34BB;
+	//rb_write_nbio(&__corelib_tx, &pkt[0], sz);
+	//notifykserver();
 	
 	for (;;) {
 		printf("TESTUELF BEFORE SLEEP\n");

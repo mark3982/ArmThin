@@ -70,6 +70,8 @@
 #define KSWI_VFREE				106
 #define KSWI_TERMPROCESS		107
 #define KSWI_TERMTHREAD			108
+#define KSWI_TKMALLOC			109
+#define KSWI_TKADDTHREAD		110
 
 #define KTHREAD_SLEEPING			0x01
 #define KTHREAD_WAKEUP				0x02
@@ -82,6 +84,9 @@
 #define KMSG_THREADMESSAGE		2
 #define KMSG_REQSHARED			3
 #define KMSG_ACPSHARED			4
+#define KMSG_CREATETHREAD		5
+#define KMSG_REGSERVICE			6
+#define KMSG_ENUMSERVICES		7
 
 #define KPROCESS_DEAD			0x1
 	
@@ -158,7 +163,11 @@ typedef struct _KSTATE {
 	KPROCESS					*idleproc;
 	KATOMIC_CCLOCK				schedlock;
 	KSTACK						runnable;
+	uint32						tswcycle;
 
+	uint32						tmpsum;
+	uint32						tmpcnt;
+	uint32						tmplow;
 	/* kernel thread dealloc */
 	MWSR						dealloc;
 	

@@ -296,7 +296,7 @@ void ksched() {
 		kt->lr = __lr;
 		kt->locked = 0;			/* unlock thread so other cpus can grab it */
 	}
-
+	
 	/* build runnable stack if needed */
 	if (kstack_empty(&ks->runnable)) {
 		//kprintf("BUILDING RUNNABLE\n");
@@ -306,9 +306,11 @@ void ksched() {
 				if (th->flags & KTHREAD_KIDLE) {
 					continue;
 				}				
+				
 				if (th->locked) {
 					continue;
 				}
+				
 				/* only wakeup if it is sleeping */
 				if (th->flags & KTHREAD_SLEEPING) {
 					if (th->timeout > 0 && (ks->ctime > th->timeout)) {
@@ -332,7 +334,7 @@ void ksched() {
 				
 				/* if NOT sleeping  */
 				if (!(th->flags & KTHREAD_SLEEPING)) {
-					kprintf("   ADDED %x:%s\n", th, th->dbgname);
+					//kprintf("   ADDED %x:%s\n", th, th->dbgname);
 					kstack_push(&ks->runnable, (uintptr)th);
 				}
 			}
@@ -637,7 +639,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 	KPROCESS		*proc;
 	KTHREAD			*th, *_th;
 	KCPUSTATE		*cs;
-	uint32			*stk;
+	uint32 			*stk;
 	LL				*ll;
 	
 	cs = GETCS();
@@ -665,9 +667,25 @@ void k_exphandler(uint32 lr, uint32 type) {
 			ks->ctime += r0;
 			//kprintf("delta:%x ks->ctime:%x ks:%x\n", r0, ks->ctime, ks);
 			//kprintf("IRQ: ctime:%x timer-tick:%x\n", ks->ctime, kboardGetTimerTick());
-			//kprintf(" . ... ENTRY\n");
 			ksched();
-			//kprintf(" . ... EXIT\n");
+			
+			r0 = kboardGetTimerTick() - r0;
+			
+			if (!ks->tmplow) {
+				ks->tmplow = ~0;
+			}
+			
+			if (r0 < ks->tmplow) {
+				ks->tmplow = r0;
+				kprintf("tmplow:%x\n", ks->tmplow);
+			}
+			
+			if (r0 < 0xffff) {
+				ks->tmpsum += r0;
+				ks->tmpcnt++;
+			}
+			
+			kprintf("total-ticks:%x\n", ks->tmpsum / ks->tmpcnt);
 			/* go back through normal interrupt return process */
 			return;
 		}
@@ -814,6 +832,15 @@ void k_exphandler(uint32 lr, uint32 type) {
 			case KSWI_YEILD:
 				ksched();
 				break;
+			case KSWI_TKADDTHREAD:
+				/* TODO: check for privilege mode */
+				r0 = stk[-14];
+				r1 = stk[-13];
+				kprintf("SWI ADDTHREAD proc:%x thread:%x\n", r0, r1);				
+				KCCENTER(&ks->schedlock);
+				ll_add((void**)&((KPROCESS*)r0)->threads, (void*)r1);
+				KCCEXIT(&ks->schedlock);
+				break;
 			case KSWI_KERNELMSG:
 				/* make sure the kthread wakes up */
 				/* TODO: IF MULTIPLE KTHREADS THEN CONSIDER WAKING ONE UP OR IN SOME ORDER */
@@ -826,6 +853,11 @@ void k_exphandler(uint32 lr, uint32 type) {
 				/* add signal for thread (internal locking per cpu) */
 				mwsrgla_add(&ks->ktsignal, (uintptr)cs->cthread);
 				kprintf("SYSCALL KERNELMSG\n");
+				break;
+			case KSWI_TKMALLOC:
+				/* TODO: check for privilege mode */
+				((uint32 volatile*)stk)[-14] = (uint32)kmalloc(stk[-14]);
+				kprintf("KSWI_TKMALLOC %x\n", stk[-14]);
 				break;
 			default:
 				break;
@@ -1091,13 +1123,46 @@ KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	return th;
 }
 
+/*
+	kmalloc for threads, since kernel threads can not hold the
+	same lock as a CPU the only way to do it is to issue an SWI
+	and let the CPU hold the lock (no task switching possible 
+	during it).. yes, a little ugly but it works
+*/
+void *tkmalloc(uint32 size) {
+	uintptr		result;
+	kprintf("beginning call\n");
+	asm volatile(
+		"push {r0}\n"
+		"mov r0, %[in]\n"
+		"swi %[code]\n"
+		"mov %[out], r0\n"
+		"pop {r0}\n"
+		: [out]"=r" (result) : [in]"r" (size), [code]"i" (KSWI_TKMALLOC));
+	kprintf("tkmalloc:%x\n", result);
+	return (void*)result;
+}
+
+int tkaddthread(KPROCESS *proc, KTHREAD *th) {
+	int			result;
+	asm volatile(
+		"push {r0, r1}\n"
+		"mov r0, %[proc]\n"
+		"mov r1, %[thread]\n"
+		"swi %[code]\n"
+		"mov %[out], r0\n"
+		"pop {r0, r1}\n"
+		: [out]"=r" (result) : [proc]"r" (proc), [thread]"r" (th), [code]"i" (KSWI_TKADDTHREAD));
+	return result;
+}
+
 int ksleep(uint32 timeout) {
 	int			result;
 	asm volatile (
 				"push {r0}\n"
 				"mov r0, %[in] \n"
 				"swi #101 \n"
-				"mov %[result], r0 \n"
+				"mov %[result], r0\n"
 				"pop {r0}\n"
 				: [result]"=r" (result) : [in]"r" (timeout));
 	/* convert from ticks */
@@ -1223,6 +1288,9 @@ void kthread(KTHREAD *myth) {
 							_th = (KTHREAD*)pkt[3];
 							pkt[0] = KMSG_THREADMESSAGE;
 							sz = sizeof(pkt);
+							/* put sender's process:thread id in */
+							pkt[2] = (uint32)th->proc;
+							pkt[3] = (uint32)th;
 							rb_write_nbio(&_th->krx, &pkt[0], sz);
 						} else {
 							/* send message back for error */
@@ -1232,10 +1300,37 @@ void kthread(KTHREAD *myth) {
 							rb_write_nbio(&th->krx, &pkt[0], sz);
 						}
 						break;
-					case 1:
+					case KMSG_CREATETHREAD:
+						/* fill default stuff */
+						kprintf("[kthread] create thread message RID:%x pc:%x\n", pkt[1], pkt[2]);
+						_th = (KTHREAD*)tkmalloc(sizeof(KTHREAD));
+						_th->r0 = pkt[4];
+						_th->r1 = pkt[5];
+						_th->r2 = pkt[6];
+						_th->r3 = pkt[7];
+						_th->r4 = pkt[8];
+						_th->r5 = pkt[9];
+						_th->r6 = pkt[10];
+						_th->r7 = pkt[11];
+						_th->r8 = pkt[12];
+						_th->r9 = pkt[13];
+						_th->r10 = pkt[14];
+						/* */
+						_th->r11 = pkt[3];
+						_th->r12 = pkt[2];
+						_th->sp = _th->r11;
+						_th->pc = _th->r12;
+						/* */
+						_th->cpsr = 0x60000000 | ARM4_MODE_USER;
+						_th->flags = 0;
+						_th->dbgname = "CREATEDTHREAD";
+						_th->proc = th->proc;
+						tkaddthread(th->proc, _th);
+						break;
+					case KMSG_REGSERVICE:
 						/* register service */
 						break;
-					case 2:
+					case KMSG_ENUMSERVICES:
 						/* enumerate services */
 						break;
 					case KMSG_REQSHARED:
@@ -1373,6 +1468,9 @@ void start() {
 	th->proc = process;
 	ks->idleth = th;
 	ks->idleproc = process;
+	
+	ks->tmpsum = 0;
+	ks->tmpcnt = 0;
 	
 	/*
 		this allows deallocated threads and process structures
