@@ -135,7 +135,10 @@ void printf(const char *fmt, ...) {
 }
 
 uint32 __attribute((naked)) getTicksPerSecond() {
-	asm volatile ("swi #103");
+	asm volatile (
+		"swi #103\n"
+		"bx lr\n"
+	);
 }
 
 /*
@@ -144,14 +147,12 @@ uint32 __attribute((naked)) getTicksPerSecond() {
 		  minimal and leave optimization for later on down the road if needed.
 */
 
-uint32 __sleep(uint32 timeout) {
+uint32 __attribute__((noinline)) __sleep(uint32 timeout) {
 	uint32			result;
 	asm volatile (
-			"push {r0} \n"
 			"mov r0, %[in] \n"
 			"swi #101 \n"
 			"mov %[result], r0 \n"
-			"pop {r0} \n"
 			: [result]"=r" (result) : [in]"r" (timeout));
 	return result;
 }
@@ -160,11 +161,15 @@ int sleep(uint32 timeout) {
 	int			result;
 	uint32		tps;
 	
+	printf("0:CORE:SLEEP START\n");
 	/* convert to ticks */
 	tps = getTicksPerSecond();
 	
+	printf("1:CORE:SLEEP timeout:%x tps:%x\n", timeout, tps);
 	timeout = timeout * tps;
+	printf("2:CORE:SLEEP timeout:%x\n", timeout);
 	
+	printf("3:CORE:SLEEP\n");
 	result = __sleep(timeout);
 	/* convert from ticks */
 	return result / tps;
@@ -235,4 +240,6 @@ void _start(uint32 rxaddr, uint32 txaddr, uint32 txrxsz) {
 	//rb_read_bio(&__corelib_rx, 
 	
 	main();
+	
+	for (;;);
 }

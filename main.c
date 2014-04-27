@@ -313,8 +313,10 @@ void ksched() {
 				
 				/* only wakeup if it is sleeping */
 				if (th->flags & KTHREAD_SLEEPING) {
+					kprintf("SLEEPER name:%s flags:%x\n", th->dbgname ? th->dbgname : "<unknown>", th->flags);
+					
 					if (th->timeout > 0 && (ks->ctime > th->timeout)) {
-						//kprintf("WOKE UP (timeout) %x %x\n", cs->cthread, cs->cthread->timeout);
+						//kprintf("WOKE UP (timeout) %x %x\n", th, th->timeout);
 						/* wake up thread if passed timeout */
 						th->flags &= ~KTHREAD_SLEEPING;
 						th->r0 = 0;
@@ -322,7 +324,7 @@ void ksched() {
 					
 					/* wakeup thread is set to be woken up */
 					if (th->flags & KTHREAD_WAKEUP) {
-						//kprintf("WOKE UP (signal) %x\n", cs->cthread);
+						kprintf("WOKE UP (signal) thread:%x dbgname:%s\n", th, th->dbgname ? th->dbgname : "<unknown>");
 						th->flags &= ~(KTHREAD_WAKEUP | KTHREAD_SLEEPING);
 						th->r0 = ks->ctime - th->timeout;
 					}
@@ -334,7 +336,7 @@ void ksched() {
 				
 				/* if NOT sleeping  */
 				if (!(th->flags & KTHREAD_SLEEPING)) {
-					//kprintf("   ADDED %x:%s\n", th, th->dbgname);
+					kprintf("   ADDED %x:%s\n", th, th->dbgname);
 					kstack_push(&ks->runnable, (uintptr)th);
 				}
 			}
@@ -504,6 +506,7 @@ int mwsrgla_get(MWSRGLA *mwsrgla, MWSRGLA_BLOCK **cblock, uint32 *index, uintptr
 				*val = b->slots[x];
 				*cblock = b;
 				b->used--;				/* update used count */
+				b->slots[x] = 0;		/* free slot */
 				katomic_ccexit_yield(&mwsrgla->tlock);
 				return 1;
 			}
@@ -759,7 +762,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 	if (type == ARM4_XRQ_SWINT) {
 		swi = ((uint32*)((uintptr)lr - 4))[0] & 0xffff;
 		
-		//kprintf("SWI thread:%x code:%x\n", cs->cthread, swi);
+		kprintf("SWI thread:%x name:%s code:%x lr:%x\n", cs->cthread, cs->cthread->dbgname, swi, lr);
 		
 		//stk[-14] = R0;
 		//stk[-13] = R1;
@@ -838,16 +841,17 @@ void k_exphandler(uint32 lr, uint32 type) {
 				break;
 			case KSWI_GETTICKPERSECOND:
 				stk[-14] = ks->tpers;
+				kprintf("GETTICKSPERSECOND name:%s\n", cs->cthread->dbgname);
 				break;
 			case KSWI_SLEEP:
 				/* thread sleep function */
 				r0 = stk[-14];
 				
-				//kprintf("SLEEPSYSCALL thread:%x duration:%x flags:%x name:%s\n", cs->cthread, r0, cs->cthread->flags, cs->cthread->dbgname ? cs->cthread->dbgname : "<unknown>");
+				kprintf("SLEEPSYSCALL thread:%x duration:%x flags:%x name:%s\n", cs->cthread, r0, cs->cthread->flags, cs->cthread->dbgname ? cs->cthread->dbgname : "<unknown>");
 
 				cs->cthread->flags |= KTHREAD_SLEEPING;
 				if (r0 != 0) {
-					//kprintf("SLEEP total:%x r0:%x ks->ctime:%x\n", r0 + ks->ctime, r0, ks->ctime);
+					kprintf("SLEEP total:%x r0:%x ks->ctime:%x\n", r0 + ks->ctime, r0, ks->ctime);
 					cs->cthread->timeout = r0 + ks->ctime;
 				} else {
 					cs->cthread->timeout = 0;
@@ -1083,16 +1087,20 @@ KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	/* map stack page (4K) */
 	kvmm2_allocregionat(&proc->vmm, 1, 0x90000000, TLB_C_AP_FULLACCESS);
 	
+	kprintf("HEREA\n");
+	
 	/* --- ALLOC RING BUFFER INTO KERNEL SERVER THREAD PROCESS FIRST --- */
 	kvmm2_allocregion(&ks->kservproc->vmm, 1, KMEMSIZE, 0, TLB_C_AP_PRIVACCESS, &out);
 
+	kprintf("HEREB\n");
+	
 	kvmm2_getphy(&ks->vmm, (uintptr)ks->kservproc->vmm.table, &page);
 	oldpage = arm4_tlbget1();
 	arm4_tlbset1(page);
 	asm("mcr p15, #0, r0, c8, c7, #0");
 	
-	er_init(&th->krx, (void*)out, KVIRPAGESIZE >> 1, 16 * 4, 0);
-	er_init(&th->ktx, (void*)(out + (KVIRPAGESIZE >> 1)), KVIRPAGESIZE >> 1, 16 * 4, &katomic_lockspin_wfe8nr);
+	er_init(&th->krx, (void*)out, KVIRPAGESIZE >> 1, 16 * 4, &katomic_lockspin_wfe8nr);
+	er_init(&th->ktx, (void*)(out + (KVIRPAGESIZE >> 1)), KVIRPAGESIZE >> 1, 16 * 4, 0);
 	
 	arm4_tlbset1(oldpage);
 	asm("mcr p15, #0, r0, c8, c7, #0");
@@ -1373,12 +1381,14 @@ void kthread(KTHREAD *myth) {
 							pkt[2] = (uint32)th->proc;
 							pkt[3] = (uint32)th;
 							er_write_nbio(&_th->krx, &pkt[0], sz);
+							th->flags |= KTHREAD_WAKEUP;
 						} else {
 							/* send message back for error */
 							kprintf("[kthread] send failed - no proc/thread match\n");
 							pkt[0] = KMSG_SENDFAILED;
 							sz = sizeof(pkt);
 							er_write_nbio(&th->krx, &pkt[0], sz);
+							th->flags |= KTHREAD_WAKEUP;
 						}
 						break;
 					case KMSG_CREATETHREAD:
@@ -1414,16 +1424,23 @@ void kthread(KTHREAD *myth) {
 						// pkt[2] - service id
 						// pkt[3] - process id
 						// pkt[4] - thread id
+						if (pkt[3] == 0) {
+							pkt[3] = (uintptr)th->proc;
+							pkt[4] = (uintptr)th;
+						}
+						
 						/* register service */
 						if (!(th->proc->flags & KPROCESS_SYSTEM)) {
 							pkt[0] = KMSG_REGSERVICEFAILD;
 							er_write_nbio(&th->krx, &pkt[0], sz);
 						} else {
+							kprintf("[kthread] service registered for %x as %x:%x\n", pkt[2] & 3, pkt[3], pkt[4]);
 							pkt[0] = KMSG_REGSERVICEOK;
 							ks->ssr_proc[pkt[2] & 3] = pkt[3];
 							ks->ssr_th[pkt[2] & 3] = pkt[4];
 							er_write_nbio(&th->krx, &pkt[0], sz);							
 						}
+						th->flags |= KTHREAD_WAKEUP;
 						break;
 					case KMSG_ENUMSERVICE:
 						// request:
@@ -1437,10 +1454,14 @@ void kthread(KTHREAD *myth) {
 						//  pkt[3] - process id
 						//  pkt[4] - thread id
 						/* enumerate services */
+						kprintf("[kthread] enum service request\n");
 						pkt[0] = KMSG_ENUMSERVICEREPLY;
 						pkt[3] = ks->ssr_proc[pkt[2] & 3];
-						pkt[4] - ks->ssr_th[pkt[2] & 3];
-						er_write_nbio(&th->krx, &pkt[0], sz);
+						pkt[4] = ks->ssr_th[pkt[2] & 3];
+						kprintf("[kthread] returning %x:%x\n", pkt[3], pkt[4]);
+						er_write_nbio(&th->krx, &pkt[0], 4 * 5);
+						th->flags |= KTHREAD_WAKEUP;
+						kprintf("th->flags:%x\n",  th->flags);
 						break;
 					case KMSG_REQSHARED:
 						// pkt[0] - type
@@ -1467,6 +1488,7 @@ void kthread(KTHREAD *myth) {
 							pkt[0] = KMSG_REQSHAREDFAIL;
 							er_write_nbio(&th->krx, &pkt[0], sz);
 						}
+						th->flags |= KTHREAD_WAKEUP;
 						break;
 					case KMSG_ACPSHARED:
 						// pkt[0] - type
@@ -1475,6 +1497,7 @@ void kthread(KTHREAD *myth) {
 						// pkt[3] - page count
 						// pkt[4] - target process
 						// pkt[5] - target thread
+						// pkt[.] - extra data (may specify size of buffers for TX and RX */
 						/* double check process:thread exist and active request is outstanding */
 						if (kthread_threadverify((KPROCESS*)pkt[4], (KTHREAD*)pkt[5])) {
 							_th = (KTHREAD*)pkt[5];
@@ -1483,15 +1506,15 @@ void kthread(KTHREAD *myth) {
 								
 								/* let them know it succeded and who for */
 								pkt[0] = KMSG_ACPSHAREDOK;
-								pkt[6] = pkt[4];
-								pkt[7] = pkt[5];
+								x = pkt[4];
+								y = pkt[5];
 								pkt[4] = (uintptr)th->proc;
 								pkt[5] = (uintptr)th;
 								er_write_nbio(&_th->krx, &pkt[0], sz);
 								
 								/* let them know it succeded and let other end know */
-								pkt[4] = pkt[6];
-								pkt[5] = pkt[7];
+								pkt[4] = x;
+								pkt[5] = y;
 								er_write_nbio(&th->krx, &pkt[0], sz);
 							} else {
 								/* it failed because request was not there */
@@ -1503,6 +1526,7 @@ void kthread(KTHREAD *myth) {
 							pkt[0] = KMSG_ACPSHAREDFAIL;
 							er_write_nbio(&th->krx, &pkt[0], sz);
 						}
+						th->flags |= KTHREAD_WAKEUP;
 						break;
 					default:
 						kprintf("[kthread] unknown message type:%x size:%x\n", pkt[0], sz);
@@ -1518,7 +1542,8 @@ void kthread(KTHREAD *myth) {
 
 void kidle() {
 	for (;;) {
-		asm("wfi");
+		/* everything is sleeping, then sleep the CPU */
+		asm("wfe");
 	}
 }
 

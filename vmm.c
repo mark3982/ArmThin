@@ -407,13 +407,14 @@ int kvmm2_findregion(KVMMTABLE *vmm, uintptr tc, uintptr low, uintptr high, uint
 	/* move low up if needed onto page boundary */
 	low = low & 0xfff > 0 ? (low & ~0xfff) + 0x1000 : low & ~0xfff;
 	/* drop high down if needed onto page boundary */
+	kprintf("high before:%x\n", high);
 	if (!high) {
 		high = ~0 & ~0xfff;
 	} else {
-		high = (high & ~0xfff) + 0x1000;
+		high = high & ~0xfff;
 	}
 	
-	//kprintf("low:%x high:%x\n", low, high);
+	kprintf("low:%x high:%x\n", low, high);
 	
 	t = vmm->table;
 	c = 0;
@@ -464,7 +465,7 @@ int kvmm2_allocregion(KVMMTABLE *vmm, uintptr pcnt, uintptr low, uintptr high, u
 	ks = GETKS();
 	
 	if (!high) {
-		high = low + pcnt * 0x1000;
+		high = ~0 & ~0xfff;
 	}
 	
 	low = low & ~0xFFF;
