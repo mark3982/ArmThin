@@ -6,6 +6,7 @@
 #include "kheap.h"
 #include "corelib/rb.h"
 #include "atomic.h"
+#include "ds_mla.h"
 
 #define ARM4_XRQ_RESET   0x00
 #define ARM4_XRQ_UNDEF   0x01
@@ -73,6 +74,11 @@
 #define KSWI_TKMALLOC			109
 #define KSWI_TKADDTHREAD		110
 #define KSWI_TKSHAREMEM			111
+#define KSWI_SIGNAL				112		/* same as KSWI_WAKEUP but issues signal also */
+#define KSWI_GETSIGNAL			113
+#define KSWI_GETSIGNALS			114
+
+#define KPROTO_ENTRYRING		0x100
 
 #define KTHREAD_SLEEPING			0x01
 #define KTHREAD_WAKEUP				0x02
@@ -133,6 +139,7 @@ typedef struct _MWSRGLA {
 } MWSRGLA;
 	
 struct _KPROCESS;
+struct _ERH;
 	
 typedef struct _KTHREAD {
 	struct _KTHREAD		*next;
@@ -141,15 +148,19 @@ typedef struct _KTHREAD {
 	/* debugging */
 	char				*dbgname;
 	
+	/* signals */
+	MLA					signals;
+	
 	/* thread kernel communication */
-	ERH					krx;			/* kernel server thread address */
-	ERH					ktx;			/* kernel server thread address */
+	struct _ERH			krx;			/* kernel server thread address */
+	struct _ERH			ktx;			/* kernel server thread address */
 	void				*urx;			/* thread space address */
 	void				*utx;			/* thread space address */
 	
 	/* offering memory to share */
 	uintptr				shreq_memoff;	/* memory offset */
 	uintptr				shreq_pcnt;		/* page count */
+	uintptr				shreq_rid;		/* request id */
 	
 	/* thread control */
 	uint32				timeout;			/* when to wakeup */

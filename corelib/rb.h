@@ -20,12 +20,16 @@ typedef struct _RBME RBM;
 typedef int (*KATOMIC_LOCKSPIN8NR)(volatile uint8 *ptr, uint8 id);
 
 typedef struct _ERH {
-	void				*er;			
+	uintptr				rproc;			/* remote proc */
+	uintptr				rthread;		/* remote thread */
+	void				*er;			/* map and data area */
 	uint32				tsz;			/* total size */
 	uint32				esz;			/* entry size */
 	uint32				ecnt;			/* total entries */
 	uint32				mcnt;			/* entries used by map */
+	uint32				lpos;			/* last position */
 	KATOMIC_LOCKSPIN8NR	lockfp;			/* locking function pointer */
+	uintptr				signal;			/* signal remote thread wants to get */
 } ERH;
 
 /*

@@ -10,6 +10,9 @@ void notifykserver();
 int sleep(uint32 timeout);
 void yield();
 uint32 getTicksPerSecond();
+int signal(uintptr proc, uintptr thread, uintptr signal);
+void wakeup(uintptr	proc, uintptr thread);
+uintptr getsignal();
 
 void vfree(uintptr addr, uintptr cnt);
 uintptr valloc(uintptr cnt);

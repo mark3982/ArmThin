@@ -8,6 +8,19 @@
 
 static unsigned long int next = 1;
  
+void memset(void *p, uint8 v, uintptr sz) {
+	uint8 volatile		*_p;
+	uintptr				x;
+	
+	_p = (uint8*)p;
+	
+	for (x = 0; x < sz; ++x) {
+		_p[x] = v;
+	}
+	
+	return;
+}
+ 
 uint32 __rand(uint32 next) {
     next = next * 1103515245 + 12345;
     return (uint32)(next / 65536) % 32768;
@@ -124,6 +137,14 @@ void sprintf(char *buf, const char *fmt, ...) {
 	__builtin_va_end(argp);
 }
 
+//signal(tx->rproc, tx->rthread, tx->signal);
+int signal(uintptr proc, uintptr thread, uintptr signal) {
+	asm volatile (
+		"swi %[code]" 
+		: : [code]"i" (KSWI_SIGNAL)
+	);
+}
+
 void printf(const char *fmt, ...) {
 	char					buf[128];
 	__builtin_va_list		argp;
@@ -147,7 +168,7 @@ uint32 __attribute((naked)) getTicksPerSecond() {
 		  minimal and leave optimization for later on down the road if needed.
 */
 
-uint32 __attribute__((noinline)) __sleep(uint32 timeout) {
+uint32 __attribute__((noinline)) sleepticks(uint32 timeout) {
 	uint32			result;
 	asm volatile (
 			"mov r0, %[in] \n"
@@ -170,9 +191,22 @@ int sleep(uint32 timeout) {
 	printf("2:CORE:SLEEP timeout:%x\n", timeout);
 	
 	printf("3:CORE:SLEEP\n");
-	result = __sleep(timeout);
+	result = sleepticks(timeout);
 	/* convert from ticks */
 	return result / tps;
+}
+
+uintptr getsignal() {
+	asm("swi %[code]" : : [code]"i" (KSWI_GETSIGNAL));
+}
+
+void wakeup(uintptr	proc, uintptr thread) {
+	asm volatile (
+			"push {r0, r1}\n"
+			"swi %[code]\n"
+			"pop {r0, r1}\n"
+			: : [code]"i" (KSWI_WAKEUP)
+	);
 }
 
 void notifykserver() {
@@ -183,34 +217,18 @@ void yield() {
 	asm("swi #102");
 }
 
-uintptr valloc(uintptr cnt) {
-	uintptr			result;
-
-	asm("	mov r0, %[in] \n\
+uintptr __attribute__((naked)) valloc(uintptr cnt) {
+	asm("	\
 			swi #105 \n\
-			mov %[result], r0 \n\
-		" : [result]"=r" (result) : [in]"r" (cnt));
-	return result;
+			bx lr\n\
+		");
 }
 
 void vfree(uintptr addr, uintptr cnt) {
-	asm("	mov r0, %[i1] \n\
-			mov r1, %[i2] \n\
+	asm("\
 			swi #106 \n\
+			bx lr\n\
 		" : : [i1]"r" (addr), [i2]"r" (cnt));
-}
-
-/*
-	This will copy a message into a buffer and WILL block until a message has been read, or until
-	the timeout expires.
-*/
-int rb_read_bio(RBM *rbm, void *p, uint32 *sz, uint32 *advance, uint32 timeout) {
-	while (!rb_read_nbio(rbm, p, sz, advance)) {
-		/* if timeout expired then exit */
-		if (!sleep(timeout)) {
-			break;
-		}
-	}
 }
 
 ERH				__corelib_rx;
@@ -227,17 +245,13 @@ void __attribute__((naked)) __start() {
 
 //int rb_read_bio(RBM volatile *rbm, void *p, uint32 *sz, uint32 *advance, uint32 timeout) {
 void _start(uint32 rxaddr, uint32 txaddr, uint32 txrxsz) {
-	/* setup meta data (outside shared memory / ring buffer) for protected fields */
 	printf("rxaddr:%x txaddr:%x txrxsz:%x\n", rxaddr, txaddr, txrxsz);
 	
-	//int eb_ready(ERH *erh, void *data, uint32 tsz, uint32 esz);
+	memset(&__corelib_rx, 0, sizeof(ERH));
+	memset(&__corelib_tx, 0, sizeof(ERH));
 	
 	er_ready(&__corelib_rx, (void*)rxaddr, txrxsz, 16 * 4, 0);
 	er_ready(&__corelib_tx, (void*)txaddr, txrxsz, 16 * 4, &katomic_lockspin_yield8nr);
-	
-	printf("okokok\n");
-	/* wait to read arguments from ring buffer */
-	//rb_read_bio(&__corelib_rx, 
 	
 	main();
 	

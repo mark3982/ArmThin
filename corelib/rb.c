@@ -21,6 +21,7 @@ int er_ready(ERH *erh, void *data, uint32 tsz, uint32 esz, KATOMIC_LOCKSPIN8NR l
 	erh->esz = esz;
 	erh->ecnt = ecnt;
 	erh->mcnt = mcnt;
+	erh->lpos = 0;
 	
 	return 1;
 }
@@ -47,6 +48,7 @@ int er_init(ERH * erh, void *data, uint32 tsz, uint32 esz, KATOMIC_LOCKSPIN8NR l
 	return 1;
 }
 
+
 int er_write_nbio(ERH *erh, void *p, uint32 sz) {
 	uint8			*map;
 	uint32			x, y;
@@ -55,17 +57,21 @@ int er_write_nbio(ERH *erh, void *p, uint32 sz) {
 	map = (uint8*)erh->er;
 	
 	if (!erh->lockfp) {
+		printf("[er] no lockfp!\n");
 		return -2;
 	}
 	
 	if (sz > erh->esz) {
+		printf("[er] sz:%x > erh->esz:%x\n", sz, erh->esz);
 		return -1;
 	}
 	
 	/* find entry and lock it */
 	for (x = 0; x < erh->ecnt; ++x) {
 		/* try to lock it */
+		//printf("[er] <write> checking map[%x]:%x\n", x, map[x]);
 		if (map[x] == 0 && erh->lockfp(&map[x], 1)) {
+			//printf("[er] wrote at %x\n", x);
 			/* got lock, now write data */
 			data = (uint8*)((uintptr)erh->er + x * erh->esz);
 			for (y = 0; y < sz; ++y) {
@@ -80,13 +86,19 @@ int er_write_nbio(ERH *erh, void *p, uint32 sz) {
 	return 0;
 }
 
-int er_read_nbio(ERH *erh, void *p, uint32 *sz) {
+int er_peek_nbio(ERH *erh, void *p, uint32 *sz, uint8 **mndx) {
 	uint32			x, y;
 	uint8			*map;
 	uint8			*data;
 	
 	map = (uint8*)erh->er;
-	for (x = 0; x < erh->ecnt; ++x) {
+	
+	x = erh->lpos;
+	y = 0; 
+	while (x != erh->lpos || y == 0) {
+		y = 1;
+		
+		//printf("[er] <read> checking map[%x]:%x\n", x, map[x]);
 		if (map[x] & 0x80) {
 			/* found entry, now copy out data */
 			data = (uint8*)((uintptr)erh->er + x * erh->esz);
@@ -94,14 +106,33 @@ int er_read_nbio(ERH *erh, void *p, uint32 *sz) {
 				((uint8*)p)[y] = data[y];
 			}
 			/* set entry as free */
-			map[x] = 0;
+			*sz = y;
+			*mndx = &map[x];
+			erh->lpos = x + 1;
 			return 1;
 		}
+		
+		++x;
+		/* do wrap around at arbirary value */
+		if (x >= erh->ecnt) {
+			x = 0;
+		}
 	}
-	
+	/* keep erh->lpos the same */
 	return 0;
 }
 
+int er_read_nbio(ERH *erh, void *p, uint32 *sz) {
+	uint8		*me;
+	
+	if (er_peek_nbio(erh, p, sz, &me)) {
+		/* clear entry so it can be used again */
+		me[0] = 0;
+		return 1;
+	}
+	/* nothing has been read */
+	return 0;
+}
 
 int rb_write_nbio(RBM *rbm, void *p, uint32 sz) {
 	RB volatile		*rb;

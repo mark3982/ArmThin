@@ -13,6 +13,7 @@
 #include "vmm.h"
 #include "kmod.h"
 #include "atomic.h"
+#include "ds_mla.h"
 
 extern uint8 _BOI;
 extern uint8 _EOI;
@@ -313,7 +314,7 @@ void ksched() {
 				
 				/* only wakeup if it is sleeping */
 				if (th->flags & KTHREAD_SLEEPING) {
-					kprintf("SLEEPER name:%s flags:%x\n", th->dbgname ? th->dbgname : "<unknown>", th->flags);
+					//kprintf("SLEEPER name:%s flags:%x\n", th->dbgname ? th->dbgname : "<unknown>", th->flags);
 					
 					if (th->timeout > 0 && (ks->ctime > th->timeout)) {
 						//kprintf("WOKE UP (timeout) %x %x\n", th, th->timeout);
@@ -336,7 +337,7 @@ void ksched() {
 				
 				/* if NOT sleeping  */
 				if (!(th->flags & KTHREAD_SLEEPING)) {
-					kprintf("   ADDED %x:%s\n", th, th->dbgname);
+					//kprintf("   ADDED %x:%s\n", th, th->dbgname);
 					kstack_push(&ks->runnable, (uintptr)th);
 				}
 			}
@@ -664,7 +665,6 @@ static void kswi_termprocess() {
 	/* release heap memory */
 	kfree(proc);
 	KCCEXIT(&ks->schedlock);;
-
 }
 
 static void kswi_termthread() {
@@ -699,7 +699,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 	int				x;
 	KTHREAD			*kt;
 	uintptr			out;
-	uint32			r0, r1;
+	uint32			r0, r1, r2;
 	KPROCESS		*proc;
 	KTHREAD			*th, *_th;
 	KCPUSTATE		*cs;
@@ -762,7 +762,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 	if (type == ARM4_XRQ_SWINT) {
 		swi = ((uint32*)((uintptr)lr - 4))[0] & 0xffff;
 		
-		kprintf("SWI thread:%x name:%s code:%x lr:%x\n", cs->cthread, cs->cthread->dbgname, swi, lr);
+		//kprintf("SWI thread:%x name:%s code:%x lr:%x\n", cs->cthread, cs->cthread->dbgname, swi, lr);
 		
 		//stk[-14] = R0;
 		//stk[-13] = R1;
@@ -777,8 +777,8 @@ void k_exphandler(uint32 lr, uint32 type) {
 				/* allocate range of pages and store result in R0 */
 				r0 = stk[-14];
 				kprintf("KSWI_VALLOC r0:%x\n", r0);
-				kvmm2_allocregion(&cs->cproc->vmm, r0, KMEMSIZE, 0, TLB_C_AP_PRIVACCESS, &stk[-14]);
-				kprintf("            r0:%x\n", r0);
+				kvmm2_allocregion(&cs->cproc->vmm, r0, KMEMSIZE, 0, TLB_C_AP_FULLACCESS, &stk[-14]);
+				kprintf("            stk[-14]:%x\n", stk[-14]);
 				break;
 			case KSWI_VFREE:
 				/*
@@ -824,18 +824,49 @@ void k_exphandler(uint32 lr, uint32 type) {
 					}
 				}
 				break;
+			case KSWI_GETSIGNALS:
+				/* grabs up to 1024 signals at a time */
+				break;
+			case KSWI_GETSIGNAL:
+				/* get one signal signal and return */
+				mla_get(&th->signals, &out);
+				stk[-14] = out;
+				break;
+			case KSWI_SIGNAL:
+				r0 = stk[-14];		/* proc */
+				r1 = stk[-13];		/* thread */
+				r2 = stk[-12];		/* signal */
+
+				stk[-14] = 0;		/* default failure code */
+				for (proc = ks->procs; proc; proc = proc->next) {
+					if ((uint32)proc == r0) {
+						for (th = proc->threads; th; th = th->next) {
+							if ((uint32)th == r1) {
+								/* found it now add signal */
+								mla_add(&th->signals, (uintptr)cs->cproc, r2);
+								stk[-14] = 1;	/* change code to successful */
+								break;
+							}
+						}
+						break;
+					}
+				}
+				break;
 			case KSWI_WAKEUP:
 				/* wake up thread function */
 				r0 = stk[-14];
 				r1 = stk[-13];
+				
 				for (proc = ks->procs; proc; proc = proc->next) {
 					if ((uint32)proc == r0) {
 						for (th = proc->threads; th; th = th->next) {
 							if ((uint32)th == r1) {
 								/* wake up thread */
 								th->flags |= KTHREAD_WAKEUP;
+								break;
 							}
 						}
+						break;
 					}
 				}
 				break;
@@ -847,11 +878,11 @@ void k_exphandler(uint32 lr, uint32 type) {
 				/* thread sleep function */
 				r0 = stk[-14];
 				
-				kprintf("SLEEPSYSCALL thread:%x duration:%x flags:%x name:%s\n", cs->cthread, r0, cs->cthread->flags, cs->cthread->dbgname ? cs->cthread->dbgname : "<unknown>");
+				//kprintf("SLEEPSYSCALL thread:%x duration:%x flags:%x name:%s\n", cs->cthread, r0, cs->cthread->flags, cs->cthread->dbgname ? cs->cthread->dbgname : "<unknown>");
 
 				cs->cthread->flags |= KTHREAD_SLEEPING;
 				if (r0 != 0) {
-					kprintf("SLEEP total:%x r0:%x ks->ctime:%x\n", r0 + ks->ctime, r0, ks->ctime);
+					//kprintf("SLEEP total:%x r0:%x ks->ctime:%x\n", r0 + ks->ctime, r0, ks->ctime);
 					cs->cthread->timeout = r0 + ks->ctime;
 				} else {
 					cs->cthread->timeout = 0;
@@ -901,21 +932,29 @@ void k_exphandler(uint32 lr, uint32 type) {
 				
 				acceptor = (KPROCESS*)stk[-14];
 				requestor = (KPROCESS*)stk[-13];
-				addr = stk[-13];
-				pcnt = stk[-12];
+				addr = stk[-12];
+				pcnt = stk[-11];
+				
+				printf("[tksharemem] acceptor:%x requestor:%x addr:%x pcnt:%x\n", acceptor, requestor, addr, pcnt);
 				
 				/* find free range for acceptor */
 				if (!kvmm2_findregion(&acceptor->vmm, pcnt, KMEMSIZE, 0, 0, &out)) {
 					((uint32 volatile*)stk)[-14] = 0;
+					((uint32 volatile*)stk)[-13] = 0;
+					printf("[tksharemem] failed to find region in acceptor\n");
 					break;
 				}
 				
+				printf("[tksharemem] mapping pages..\n");
 				for (x = 0; x < pcnt; ++x) {
 					kvmm2_getphy(&requestor->vmm, addr, &phy);
 					kvmm2_mapsingle(&acceptor->vmm, out + x * 0x1000, phy, TLB_C_AP_FULLACCESS);
+					printf("[tksharemem]      virtual:%x physical:%x\n", out + x * 0x1000, phy);
 				}
 				
 				((uint32 volatile*)stk)[-14] = 1;
+				((uint32 volatile*)stk)[-13] = out;
+				printf("[tksharemem] operation completed\n");
 				break;
 			}
 			default:
@@ -1117,6 +1156,8 @@ KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	th->urx = (RB*)out;
 	th->utx = (RB*)(out + (KVIRPAGESIZE >> 1));;
 	th->proc = proc;
+	/* initialize signal container */
+	mla_init(&th->signals, 20);
 	
 	/* map address space so we can work directly with it */
 	kvmm2_getphy(&ks->vmm, (uintptr)proc->vmm.table, &page);
@@ -1286,31 +1327,30 @@ int kthread_threadverify(KPROCESS *tarproc, KTHREAD *tarth) {
 	return 0;
 }
 
-int tksharememory(KPROCESS *acceptor, KPROCESS *requestor, uintptr addr, uintptr pcnt) {
-	int				result;
+uint32 simple(uint32 a, uint32 b, uint32 c, uint32 d, uint32 e) {
+	return a + b + c + d + e;
+}
+
+int __attribute__((naked)) tksharememory(KPROCESS *acceptor, KPROCESS *requestor, uintptr addr, uintptr pcnt, uintptr *out) {
+	//int				result;
 
 	asm volatile (
-		"push {r0, r1, r2, r3}\n"
-		"mov r0, %[acceptor]\n"
-		"mov r1, %[requestor]\n"
-		"mov r2, %[addr]\n"
-		"mov r3, %[pcnt]\n"
 		"swi %[code]\n"
-		"mov %[result], r0\n"
-		"pop {r0, r1, r2, r3}\n"
-		: [result]"=r" (result)
+		"ldr ip, [sp]\n"
+		"str r1, [ip]\n"
+		"bx lr\n"
+		: [out]"=r" (out)
 		: [acceptor]"r" (acceptor),
 		  [requestor]"r" (requestor),
 		  [addr]"r" (addr),
 		  [pcnt]"r" (pcnt),
 		  [code]"i" (KSWI_TKSHAREMEM)
 	);
-	return result;
 }
 
 
 void kthread(KTHREAD *myth) {
-	uint32			x, y;
+	uintptr			x, y, z;
 	KPROCESS		*proc;
 	KTHREAD			*th, *_th;
 	KSTATE			*ks;
@@ -1354,13 +1394,14 @@ void kthread(KTHREAD *myth) {
 		
 		kprintf("[kthread] checking MWSRGLA\n");
 		/* mwsrgla has a per-thread lock so it supports multiple threads */
-		while (mwsrgla_get(&ks->ktsignal, &mwsrglab, &mwsrglandx, (uintptr*)&th)) {		
+		while (mwsrgla_get(&ks->ktsignal, &mwsrglab, &mwsrglandx, (uintptr*)&th)) {
 			/* remove DOS prevention flag */
 			th->flags &= ~KTHREAD_WAKINGUPKTHREAD;
 			
-			kprintf("[kthread] reading RB for thread:%x[%s]\n", th, th->dbgname);
+			kprintf("[testuelf] [kthread] reading RB for thread:%x[%s]\n", th, th->dbgname);
 			for (sz = sizeof(pkt); er_read_nbio(&th->ktx, &pkt[0], &sz); sz = sizeof(pkt)) {
 				kprintf("[kthread] got pkt\n");
+				kprintf("[testuelf] [kthread] got pkt %x\n", pkt[0]);
 				/* check packet type */
 				switch (pkt[0]) {
 					case KMSG_SENDMESSAGE:
@@ -1470,21 +1511,30 @@ void kthread(KTHREAD *myth) {
 						// pkt[3] - page count
 						// pkt[4] - target process
 						// pkt[5] - target thread
+						// ------ application specific (not enforced) -----
+						// pkt[6] - signal to be used for requestor
+						// pkt[7] - protocol expected
+						// pkt[8] - TX buffer size expected
+						// pkt[9] - RX buffer size expected
 						
-						/* save for verification (to prevent expoiting) */
+						/* do verification (to prevent expoiting) */
 						if (kthread_threadverify((KPROCESS*)pkt[4], (KTHREAD*)pkt[5])) {
+							kprintf("[kthread] verify good sending requent and reply\n");
+							th->shreq_rid = pkt[1];
 							th->shreq_memoff = pkt[2];
 							th->shreq_pcnt = pkt[3];
 							/* reply we are good */
 							pkt[0] = KMSG_REQSHAREDOK;
 							er_write_nbio(&th->krx, &pkt[0], sz);
 							/* send request to target */
+							_th = (KTHREAD*)pkt[5];
 							pkt[0] = KMSG_REQSHARED;
 							pkt[4] = (uintptr)th->proc;
 							pkt[5] = (uintptr)th;
-							_th = (KTHREAD*)pkt[5];
 							er_write_nbio(&_th->krx, &pkt[0], sz);
+							_th->flags |= KTHREAD_WAKEUP;
 						} else {
+							kprintf("[kthread] req shared failed; sending reply\n");
 							pkt[0] = KMSG_REQSHAREDFAIL;
 							er_write_nbio(&th->krx, &pkt[0], sz);
 						}
@@ -1497,31 +1547,54 @@ void kthread(KTHREAD *myth) {
 						// pkt[3] - page count
 						// pkt[4] - target process
 						// pkt[5] - target thread
-						// pkt[.] - extra data (may specify size of buffers for TX and RX */
+						// pkt[6] - target rid
+						// pkt[6] - signal to be used for acceptor (requestor asserts this signal)
+						// pkt[.] - extra data
 						/* double check process:thread exist and active request is outstanding */
 						if (kthread_threadverify((KPROCESS*)pkt[4], (KTHREAD*)pkt[5])) {
 							_th = (KTHREAD*)pkt[5];
-							if (!pkt[2] && !pkt[3] && pkt[2] == _th->shreq_memoff && pkt[3] == _th->shreq_pcnt) {
-								tksharememory(th->proc, (KPROCESS*)pkt[4], pkt[2], pkt[3]);
+							printf("_th->shreq_memoff:%x(%x) _th->shreq_pcnt:%x(%x) _th->shreq_rid:%x(%x)\n",
+								_th->shreq_memoff, pkt[2],
+								_th->shreq_pcnt, pkt[3],
+								_th->shreq_rid, pkt[6]
+							);
+							if ( /* make sure it all matches up */
+								pkt[2] && pkt[3] && 
+								pkt[2] == _th->shreq_memoff && 
+								pkt[3] == _th->shreq_pcnt &&
+								pkt[6] == _th->shreq_rid
+								) {
+								printf("[kthread] sharing memory..\n");
+								tksharememory(th->proc, (KPROCESS*)pkt[4], pkt[2], pkt[3], &out);
+								printf("[kthread]      ... done\n");
 								
 								/* let them know it succeded and who for */
 								pkt[0] = KMSG_ACPSHAREDOK;
 								x = pkt[4];
 								y = pkt[5];
+								z = pkt[1];
 								pkt[4] = (uintptr)th->proc;
 								pkt[5] = (uintptr)th;
+								pkt[1] = _th->shreq_rid;
 								er_write_nbio(&_th->krx, &pkt[0], sz);
+								_th->flags |= KTHREAD_WAKEUP;
 								
 								/* let them know it succeded and let other end know */
+								pkt[1] = z;
+								pkt[2] = out;		/* tell acceptor their memory address */
 								pkt[4] = x;
 								pkt[5] = y;
 								er_write_nbio(&th->krx, &pkt[0], sz);
+								printf("[kthread] memory shared; sent notifications\n");
 							} else {
+								printf("[kthread] ACPSHARED fail due to request not standing.\n");
 								/* it failed because request was not there */
 								pkt[0] = KMSG_ACPSHAREDFAIL;
 								er_write_nbio(&th->krx, &pkt[0], sz);
 							}
+							th->flags |= KTHREAD_WAKEUP;
 						} else {
+							printf("[kthread] ACPSHARED fail due to bad process:thread address\n");
 							/* let them know it failed */
 							pkt[0] = KMSG_ACPSHAREDFAIL;
 							er_write_nbio(&th->krx, &pkt[0], sz);
@@ -1536,7 +1609,7 @@ void kthread(KTHREAD *myth) {
 			kprintf("[kthread] done reading RB\n");
 		}
 		kprintf("[kthread] sleeping\n");
-		ksleep(ks->tpers * 10);
+		ksleep(ks->tpers * 100);
 	}
 }
 
@@ -1634,6 +1707,7 @@ void start() {
 	th->proc = process;
 	ks->kservthread = th;
 	ks->kservproc = process;
+	mla_init(&th->signals, 20);
 	
 	th = (KTHREAD*)kmalloc(sizeof(KTHREAD));
 	memset(th, 0, sizeof(KTHREAD));
