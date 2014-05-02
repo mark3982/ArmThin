@@ -12,7 +12,9 @@ void yield();
 uint32 getTicksPerSecond();
 int signal(uintptr proc, uintptr thread, uintptr signal);
 void wakeup(uintptr	proc, uintptr thread);
-uintptr getsignal();
+uint32 getosticks();
+int getsignal(uintptr *process, uintptr *signal);
+uintptr getpagesize();
 
 void vfree(uintptr addr, uintptr cnt);
 uintptr valloc(uintptr cnt);

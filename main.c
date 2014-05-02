@@ -1,12 +1,3 @@
-/*
-	http://wiki.osdev.org/User:Pancakes/BitmapHeapImplementation
-	
-	I just placed all the structs and prototypes into a seperate header.
-	
-	You need to create this header, and place the implementation into another
-	source file named for example kheap_bm.c. Then compile and link that with
-	this source file.
-*/
 #include "stdtypes.h"
 #include "main.h"
 #include "kheap.h"
@@ -21,15 +12,22 @@ extern uint8 _EOI;
 void start(void);
 
 /*
-    This could be non-standard behavior, but as long as this resides at the top of this source and it is the
-    first file used in the linking process (according to alphanumerical ordering) this code will start at the
-    beginning of the .text section.
+	@sdescription:	The entry point for all CPUs controlled by this kernel.
+    @devnote:		This could be non-standard behavior, but as long as 
+					this resides at the top of this source and it is the
+					first file used in the linking process (according to
+					alphanumerical ordering) this code will start at the
+					beginning of the .text section.
 */
 void __attribute__((naked)) __attribute__((section(".boot"))) entry() {
 	/* branch to board code */
 	asm volatile ("b boardEntry");
 }
 
+/*
+	@sdescription:		Sets byte of memory at specified location to
+						value specified of size given.
+*/
 void memset(void *p, uint8 v, uintptr sz) {
 	uint8 volatile		*_p;
 	uintptr				x;
@@ -43,7 +41,9 @@ void memset(void *p, uint8 v, uintptr sz) {
 	return;
 }
 
-/* small chunk memory alloc/free */
+/*
+	@sdescription:		Primary kernel heap deallocation routine.
+*/
 void kfree(void *ptr) {
 	KSTATE			*ks;
 	
@@ -52,6 +52,9 @@ void kfree(void *ptr) {
 	k_heapBMFree(&ks->hchk, ptr);
 }
 
+/*
+	@sdescription:		Primary kernel heap allocation routine.
+*/
 void* kmalloc(uint32 size) {
 	void			*ptr;
 	KSTATE			*ks;
@@ -95,6 +98,9 @@ void* kmalloc(uint32 size) {
 	return ptr;
 }
 		
+/*
+	@sdescription:		Get CPSR of current CPU.
+*/
 uint32 arm4_cpsrget()
 {
     uint32      r;
@@ -103,6 +109,9 @@ uint32 arm4_cpsrget()
     return r;
 }
 
+/*
+	@sdescription:		Get SPSR of current CPU.
+*/
 uint32 arm4_spsrget()
 {
     uint32      r;
@@ -111,58 +120,93 @@ uint32 arm4_spsrget()
     return r;
 }
 
+/*
+	@sdescription:		Set CPSR of current CPU.
+*/
 void arm4_cpsrset(uint32 r)
 {
     asm("msr cpsr, %[ps]" : : [ps]"r" (r));
 }
 	
+/*
+	@sdescription:		Enable FIQ
+*/
 void arm4_xrqenable_fiq()
 {
     arm4_cpsrset(arm4_cpsrget() & ~(1 << 6));
 }
 
+/*
+	@sdescription:		Enable IRQ
+*/
 void arm4_xrqenable_irq()
 {
     arm4_cpsrset(arm4_cpsrget() & ~(1 << 7));
 }
 
+/*
+	@sdescription:		Set TTBR0 table address.
+*/
 void arm4_tlbset0(uint32 base) {
 	asm("mcr p15, 0, %[tlb], c2, c0, 0" : : [tlb]"r" (base));
 }
 
+/*
+	@sdescription:		Set TTBR1 table address.
+*/
 void arm4_tlbset1(uint32 base) {
 	asm("mcr p15, 0, %[tlb], c2, c0, 1" : : [tlb]"r" (base));
 }
 
+/*
+	@sdescription:		Get TTBR1 table address.
+*/
 uint32 arm4_tlbget1() {
 	uint32			base;
 	asm("mrc p15, 0, %[tlb], c2, c0, 1" : [tlb]"=r" (base));
 	return base;
 }
 
+/*
+	@sdescription:		Set TLB mode. TTBR0 and TTBR1 division.
+*/
 void arm4_tlbsetmode(uint32 val) {
 	asm("mcr p15, 0, %[tlb], c2, c0, 2" : : [tlb]"r" (val));
 }
 
+/*
+	@sdescription:		Sets exception/vector table base address.
+*/
 void arm4_setvecbase(uint32 val) {
 	asm("mcr p15, 0, %[val], c12, c0, 0" : : [val]"r" (val));
 }
 
+/*
+	@sdescription:		Sets ARM domain register.
+*/
 void arm4_tlbsetdom(uint32 val) {
 	asm("mcr p15, 0, %[val], c3, c0, 0" : : [val]"r" (val));
 }
 
+/*
+	@sdescription:		Gets ARM TLB control register.
+*/
 uint32 arm4_tlbgetctrl() {
 	uint32			ctrl;
 	asm("mrc p15, 0, %[ctrl], c1, c0, 0" : [ctrl]"=r" (ctrl));
 	return ctrl;
 }
 
+/*
+	@sdescription:		Sets ARM TLB control register.
+*/
 void arm4_tlbsetctrl(uint32 ctrl) {
 	asm("mcr p15, 0, %[ctrl], c1, c0, 0" : : [ctrl]"r" (ctrl));
 }
 
-/* physical page memory alloc/free */
+/*
+	@sdescription:		Allocates single page from the physical page heap.
+*/
 void* kpalloc(uint32 size) {
 	KSTATE			*ks;
 	
@@ -170,6 +214,9 @@ void* kpalloc(uint32 size) {
 	return k_heapBMAlloc(&ks->hphy, size);
 }
 
+/*
+	@sdescription:		Frees a single page back to the physical page heap.
+*/
 void kpfree(void *ptr) {
 	KSTATE			*ks;
 	
@@ -177,47 +224,9 @@ void kpfree(void *ptr) {
 	k_heapBMFree(&ks->hphy, ptr);
 }
 
-void ll_add(void **p, void *i) {
-	LL		*_i;
-	
-	_i = (LL*)i;
-	
-	_i->next = *p;
-	if (*p) {
-		_i->prev = ((LL*)(*p))->prev;
-	} else {
-		_i->prev = 0;
-	}
-	
-	if (p) {
-		*p = _i;
-	}
-}
-
-void ll_rem(void **p, void *i) {
-	LL			*_i;
-	
-	_i = (LL*)i;
-
-	if (_i->prev) {
-		_i->prev->next = _i->next;
-	}
-	
-	if (_i->next) {
-		_i->next->prev = _i->prev;
-	}
-	
-	if (p) {
-		if (*p == i) {
-			if (_i->prev) {
-				*p = _i->prev;
-			} else {
-				*p = _i->next;
-			}
-		}
-	}
-}
-
+/*
+	@sdescription:		Dumps thread state. Hardly ever used.
+*/
 void kdumpthreadinfo(KTHREAD *th) {
 	kprintf("r0:%x\tr1:%x\tr2:%x\tr3:%x\n", th->r0, th->r1, th->r2, th->r3);
 	kprintf("r4:%x\tr5:%x\tr6:%x\tr7:%x\n", th->r4, th->r5, th->r6, th->r7);
@@ -225,6 +234,10 @@ void kdumpthreadinfo(KTHREAD *th) {
 	kprintf("r12:%x\tsp:%x\tlr:%x\tcpsr:%x\n", th->r12, th->sp, th->lr, th->cpsr);
 }
 
+/*
+	@sdescription:		Allows a CPU to save the current thread and load
+						the next thread.
+*/
 void ksched() {
 	KSTATE			*ks;
 	KTHREAD			*kt;
@@ -463,6 +476,9 @@ static void kprocfree__walkercb(uintptr v, uintptr p) {
 	}
 }
 
+/*
+	@sdescription:	Not sure if this is used anymore..
+*/
 int kprocfree(KPROCESS *proc) {
 	kprintf("kprocfree...\n");
 	/* walk entries and free them */
@@ -471,6 +487,9 @@ int kprocfree(KPROCESS *proc) {
 	return 1;
 }
 
+/*
+	@sdescription:		Gets one item from extending array.
+*/
 int mwsrgla_get(MWSRGLA *mwsrgla, MWSRGLA_BLOCK **cblock, uint32 *index, uintptr *val) {
 	uint32				x;
 	MWSRGLA_BLOCK		*b;
@@ -520,6 +539,9 @@ int mwsrgla_get(MWSRGLA *mwsrgla, MWSRGLA_BLOCK **cblock, uint32 *index, uintptr
 	return 0;
 }
 
+/*
+	@sdescription:	For CPU to adds one item to extending array.
+*/
 int mwsrgla_add(MWSRGLA *mwsrgla, uintptr val) {
 	MWSRGLA_BLOCK			*b;
 	uint32					x;
@@ -549,6 +571,9 @@ int mwsrgla_add(MWSRGLA *mwsrgla, uintptr val) {
 	KCCEXIT(&mwsrgla->lock);
 }
 
+/*
+	@sdescription:	Initializes the dynamically extending container.
+*/
 int mwsrgla_init(MWSRGLA *mwsrgla, uint32 dmax) {
 	uint32			x;
 
@@ -569,6 +594,9 @@ int mwsrgla_init(MWSRGLA *mwsrgla, uint32 dmax) {
 	return 1;
 }
 
+/*	
+	@sdescription:	Initialize to be deallocated pointer container.
+*/
 int mwsr_init(MWSR *mwsr, uint32 max) {
 	memset(mwsr, 0, sizeof(MWSR));
 	mwsr->max = max;
@@ -581,6 +609,10 @@ int mwsr_init(MWSR *mwsr, uint32 max) {
 	return 1;
 }
 
+/*
+	@sdescription:	Used by kernel thread to get
+					one item that needs to be allocated.
+*/
 int mwsr_getone(MWSR *mwsr, uintptr *v) {
 	uint32			x;
 
@@ -595,6 +627,9 @@ int mwsr_getone(MWSR *mwsr, uintptr *v) {
 	return 0;
 }
 
+/*
+	@sdescription:	Used by a CPU to place an item to be deallocated later.
+*/
 int mwsr_add(MWSR *mwsr,  uintptr v) {
 	LL			*ll, *_ll;
 	uint32		x;
@@ -629,6 +664,10 @@ int mwsr_add(MWSR *mwsr,  uintptr v) {
 	return 1;
 }
 
+/*
+	@sdescription:		Provides locking to remove a process from the
+						scheduler.
+*/
 static void kswi_termprocess() {
 	KSTATE				*ks;
 	KCPUSTATE			*cs;
@@ -667,6 +706,9 @@ static void kswi_termprocess() {
 	KCCEXIT(&ks->schedlock);;
 }
 
+/*
+	@sdescription:		Provides locking needed to remove a thread from a process.
+*/
 static void kswi_termthread() {
 	KPROCESS			*proc;
 	KTHREAD				*th;
@@ -689,8 +731,10 @@ static void kswi_termthread() {
 	return;
 }
 
-//__attribute__((optimize("O0")))
-//__attribute__ ((noinline))
+/*
+	@sdescription:			Common entry of all exceptions. Provides a central
+							place to handle exceptions.
+*/
 void k_exphandler(uint32 lr, uint32 type) {
 	uint32 volatile	*t0mmio;
 	uint8 volatile	*picmmio;
@@ -698,7 +742,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 	KSTATE			*ks;
 	int				x;
 	KTHREAD			*kt;
-	uintptr			out;
+	uintptr			out, out2;
 	uint32			r0, r1, r2;
 	KPROCESS		*proc;
 	KTHREAD			*th, *_th;
@@ -773,6 +817,9 @@ void k_exphandler(uint32 lr, uint32 type) {
 			case KSWI_TERMTHREAD:
 				kswi_termthread();
 				break;
+			case KSWI_GETPAGESIZE:
+				stk[-14] = KVIRPAGESIZE;
+				break;
 			case KSWI_VALLOC:
 				/* allocate range of pages and store result in R0 */
 				r0 = stk[-14];
@@ -824,13 +871,17 @@ void k_exphandler(uint32 lr, uint32 type) {
 					}
 				}
 				break;
+			case KSWI_GETOSTICKS:
+				stk[-14] = ks->ctime;
+				break;
 			case KSWI_GETSIGNALS:
 				/* grabs up to 1024 signals at a time */
 				break;
 			case KSWI_GETSIGNAL:
 				/* get one signal signal and return */
-				mla_get(&th->signals, &out);
-				stk[-14] = out;
+				stk[-14] = mla_get(&th->signals, &out, &out2);
+				stk[-13] = out;			/* process */
+				stk[-12] = out2;		/* signal */
 				break;
 			case KSWI_SIGNAL:
 				r0 = stk[-14];		/* proc */
@@ -890,7 +941,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 
 				ksched();
 				break;
-			case KSWI_YEILD:
+			case KSWI_YIELD:
 				ksched();
 				break;
 			case KSWI_TKADDTHREAD:
@@ -1018,7 +1069,12 @@ void k_exphandler(uint32 lr, uint32 type) {
 	
 	return;
 }
-	
+
+/*
+	@sdescription:		Installs handler for exception vector using the absolute
+						address of the handler. Handler must be within 32MB of
+						the exception table at memory location 0x0.
+*/
 void arm4_xrqinstall(uint32 ndx, void *addr) {
 	char buf[32];
     uint32      *v;
@@ -1065,6 +1121,11 @@ typedef struct {
        Elf32_Word      sh_entsize;
 } ELF32_SHDR;
 
+/*
+	@sdescription:		Loads an ELF32 image from kernel space into it's
+						own userspace, and creates one thread that starts
+						at the specified entry point.
+*/
 KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 	ELF32_EHDR			*ehdr;
 	ELF32_SHDR			*shdr;
@@ -1231,10 +1292,10 @@ KTHREAD* kelfload(KPROCESS *proc, uintptr addr, uintptr sz) {
 }
 
 /*
-	kmalloc for threads, since kernel threads can not hold the
-	same lock as a CPU the only way to do it is to issue an SWI
-	and let the CPU hold the lock (no task switching possible 
-	during it).. yes, a little ugly but it works
+	@sdescription:			Used by kernel thread to allocate kernel heap memory.
+	@ldescription:			This happens because the kernel heap memory interface
+							is protected by per-CPU locks instead of per-thread
+							locks. 
 */
 void *tkmalloc(uint32 size) {
 	uintptr		result;
@@ -1250,6 +1311,9 @@ void *tkmalloc(uint32 size) {
 	return (void*)result;
 }
 
+/*
+	@sdescription:			Used by a kernel thread to add a thread to a process.
+*/
 int tkaddthread(KPROCESS *proc, KTHREAD *th) {
 	int			result;
 	asm volatile(
@@ -1263,6 +1327,9 @@ int tkaddthread(KPROCESS *proc, KTHREAD *th) {
 	return result;
 }
 
+/*
+	@sdescription:			A sleep for ticks function for kernel threads.
+*/
 int ksleep(uint32 timeout) {
 	int			result;
 	asm volatile (
@@ -1276,12 +1343,23 @@ int ksleep(uint32 timeout) {
 	return result;
 }
 
+/*
+	@sdescription:		Produces a peusudo random number from a integer passed in.
+*/
 static uint32 rand(uint32 next)
 {
     next = next * 1103515245 + 12345;
     return (uint32)(next / 65536) % 32768;
 }
 
+/*
+	@group:				Kernel.KThread
+	@sdescription:		Will verify that specified process and
+						thread exists and pointers are valid.
+	@param:>tarproc:	specified process
+	@param:>tarth:		specified thread
+	@return:			positive integer means success
+*/
 int kthread_threadverify(KPROCESS *tarproc, KTHREAD *tarth) {
 	uint32			x, y;
 	KPROCESS		*proc;
@@ -1327,13 +1405,25 @@ int kthread_threadverify(KPROCESS *tarproc, KTHREAD *tarth) {
 	return 0;
 }
 
-uint32 simple(uint32 a, uint32 b, uint32 c, uint32 d, uint32 e) {
-	return a + b + c + d + e;
-}
-
-int __attribute__((naked)) tksharememory(KPROCESS *acceptor, KPROCESS *requestor, uintptr addr, uintptr pcnt, uintptr *out) {
-	//int				result;
-
+/*
+	@group:				Kernel.KThread
+	@sdescription:		Provides SWI wrapped for mapping
+						shared memory between two processes.
+	@param:acceptor:	process that is accepting this memory
+						share operation
+	@param:requestor:	process that requested this memory
+						share operation
+	@param:addr:		address of page aligned data that is
+						already mapped into the requestor
+						proces
+	@param:pcnt:		count of contigious pages
+	@param:>out:		holds the address of the memory mapped
+						into the acceptor process
+	@return:			positive integer is successful
+*/
+int __attribute__((naked)) tksharememory(
+				KPROCESS *acceptor, KPROCESS *requestor, 
+				uintptr addr, uintptr pcnt, uintptr *out) {
 	asm volatile (
 		"swi %[code]\n"
 		"ldr ip, [sp]\n"
@@ -1348,7 +1438,15 @@ int __attribute__((naked)) tksharememory(KPROCESS *acceptor, KPROCESS *requestor
 	);
 }
 
-
+/*
+	@group:			Kernel.KThread
+	@sdescription:	The kernel server thread. Handles everything
+					that the SWI interface does not handle.
+	@ldescription:	Can handle multiple instances by different
+					threads allowing each CPU for this specific
+					kernel to help share the load of requests.
+	@param:myth:	pointer to thread executing this procedure
+*/
 void kthread(KTHREAD *myth) {
 	uintptr			x, y, z;
 	KPROCESS		*proc;
@@ -1613,6 +1711,13 @@ void kthread(KTHREAD *myth) {
 	}
 }
 
+/*
+	@sdescription:			A thread the CPU runs when it has no other task to run.
+	@ldescription:			A thread the CPU runs when it has no other tasks to run.
+							This is likely not a very efficent way to do this. I will
+							likey make the scheduler issue this instruction directly
+							in the code and remove this function later.
+*/
 void kidle() {
 	for (;;) {
 		/* everything is sleeping, then sleep the CPU */
@@ -1620,6 +1725,11 @@ void kidle() {
 	}
 }
 
+/*
+	@sdescription:		Does common work not specific to any board or platform. This
+						is called by the board module once it has configured the
+						basic required systems.
+*/
 void start() {
 	uint32		*t0mmio;
 	uint32		*picmmio;

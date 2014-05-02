@@ -137,11 +137,23 @@ void sprintf(char *buf, const char *fmt, ...) {
 	__builtin_va_end(argp);
 }
 
-//signal(tx->rproc, tx->rthread, tx->signal);
-int signal(uintptr proc, uintptr thread, uintptr signal) {
+int __attribute__((naked)) signal(uintptr proc, uintptr thread, uintptr signal) {
 	asm volatile (
 		"swi %[code]" 
 		: : [code]"i" (KSWI_SIGNAL)
+	);
+}
+
+int __attribute__((naked)) getsignal(uintptr *process, uintptr *signal) {
+	asm volatile (
+		"push {r3, r4}\n"
+		"mov r3, r0\n"
+		"mov r4, r1\n"
+		"swi %[code]\n"
+		"str r1, [r3]\n"
+		"str r2, [r4]\n"
+		"pop {r3, r4}\n"
+		: : [code]"i" (KSWI_GETSIGNAL)
 	);
 }
 
@@ -196,8 +208,8 @@ int sleep(uint32 timeout) {
 	return result / tps;
 }
 
-uintptr getsignal() {
-	asm("swi %[code]" : : [code]"i" (KSWI_GETSIGNAL));
+uint32 getosticks() {
+	asm("swi %[code]" : : [code]"i" (KSWI_GETOSTICKS));
 }
 
 void wakeup(uintptr	proc, uintptr thread) {
@@ -214,46 +226,110 @@ void notifykserver() {
 }
 
 void yield() {
-	asm("swi #102");
+	asm volatile (
+		"swi %[code]"
+		: : [code]"i" (KSWI_YIELD)
+	);
 }
 
 uintptr __attribute__((naked)) valloc(uintptr cnt) {
-	asm("	\
-			swi #105 \n\
-			bx lr\n\
-		");
+	asm volatile (
+			"swi %[code]\n"
+			"bx lr\n"
+			: : [code]"i" (KSWI_VALLOC)
+		);
 }
 
-void vfree(uintptr addr, uintptr cnt) {
-	asm("\
-			swi #106 \n\
-			bx lr\n\
-		" : : [i1]"r" (addr), [i2]"r" (cnt));
+void __attribute__((naked)) vfree(uintptr addr, uintptr cnt) {
+	asm volatile (
+			"swi %[code]\n"
+			"bx lr\n"
+			: : [code]"i" (KSWI_VFREE)
+	);
+}
+
+int __attribute__((naked)) getvirtref(uintptr v) {
+	asm volatile (
+		"swi %[code]"
+		: : [code]"i" (KSWI_GETVIRTREF)
+	);
+}
+
+uintptr __attribute__((naked)) getpagesize() {
+	asm volatile ("swi %[code]" : : [code]"i" (KSWI_GETPAGESIZE));
 }
 
 ERH				__corelib_rx;
 ERH				__corelib_tx;
+KHEAPBM			__corelib_heap;
 
-void __attribute__((naked)) __start() {
-	asm("	__localloop:\n\
-			mov r1, #0xa0000000\n\
-			mov r2, #69\n\
-			str r2, [r1]\n\
-			b __localloop"
-		);
+void *malloc(uint32 size) {
+	void			*ptr;
+	uint32			_size;	
+	uintptr			pagesize;
+	uintptr			minheapblksz;
+	
+	/* attempt first allocation try (will fail on very first) */
+	ptr = k_heapBMAlloc(&__corelib_heap, size);
+	
+	/* try adding more memory if failed */
+	if (!ptr) {
+		pagesize = getpagesize();
+		minheapblksz = 4;
+		
+		if (size < (minheapblksz * pagesize) / 2) {
+			/* we need to allocate blocks at least this size */
+			_size = minheapblksz;
+		} else {
+			/* this is bigger than KCHKMINBLOCKSZ, so lets double it to be safe */
+			/* round up allocation to use all the blocks taken */
+			_size = size * 2;
+			_size = (_size / pagesize) * pagesize < _size ? _size / pagesize + 1 : _size / pagesize;
+		}
+		
+		/* allocate more memory and add block */
+		ptr = (void*)valloc(_size);
+		
+		if (!ptr) {
+			return 0;
+		}
+		
+		k_heapBMAddBlock(&__corelib_heap, (uintptr)ptr, _size * KPHYPAGESIZE, KCHKHEAPBSIZE);
+		
+		/* try allocation once more, should succeed */
+		ptr = k_heapBMAlloc(&__corelib_heap, size);
+		if (!ptr) {
+			return 0;
+		}
+	}
+	
+	return ptr;
 }
 
-//int rb_read_bio(RBM volatile *rbm, void *p, uint32 *sz, uint32 *advance, uint32 timeout) {
+void free(void *ptr) {
+	k_heapBMFree(&__corelib_heap, ptr);
+}
+
 void _start(uint32 rxaddr, uint32 txaddr, uint32 txrxsz) {
+	uintptr			heapoff;
+
 	printf("rxaddr:%x txaddr:%x txrxsz:%x\n", rxaddr, txaddr, txrxsz);
 	
 	memset(&__corelib_rx, 0, sizeof(ERH));
 	memset(&__corelib_tx, 0, sizeof(ERH));
 	
+	/* allocate initial heap at about 4 virtual pages with 16 byte blocks */
+	k_heapBMInit(&__corelib_heap);
+	heapoff = valloc(4);
+	k_heapBMAddBlock(&__corelib_heap, heapoff, 4 * getpagesize(), 16);
+	
+	/* ready our encapsulating structures for the kernel link */
 	er_ready(&__corelib_rx, (void*)rxaddr, txrxsz, 16 * 4, 0);
 	er_ready(&__corelib_tx, (void*)txaddr, txrxsz, 16 * 4, &katomic_lockspin_yield8nr);
 	
+	/* launch the next layer of application because we are done here */
 	main();
 	
+	/* TODO: add termination */
 	for (;;);
 }

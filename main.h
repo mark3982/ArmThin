@@ -3,8 +3,9 @@
 #include "stdtypes.h"
 #include "config.h"
 #include "vmm.h"
-#include "kheap.h"
+#include "corelib/kheap.h"
 #include "corelib/rb.h"
+#include "corelib/linklist.h"
 #include "atomic.h"
 #include "ds_mla.h"
 
@@ -64,7 +65,7 @@
 
 #define KSWI_WAKEUP				100
 #define KSWI_SLEEP				101
-#define KSWI_YEILD				102
+#define KSWI_YIELD				102
 #define KSWI_GETTICKPERSECOND	103
 #define KSWI_KERNELMSG			104
 #define KSWI_VALLOC				105
@@ -77,6 +78,9 @@
 #define KSWI_SIGNAL				112		/* same as KSWI_WAKEUP but issues signal also */
 #define KSWI_GETSIGNAL			113
 #define KSWI_GETSIGNALS			114
+#define KSWI_GETOSTICKS			115
+#define KSWI_GETVIRTREF			116
+#define KSWI_GETPAGESIZE		117
 
 #define KPROTO_ENTRYRING		0x100
 
@@ -107,11 +111,6 @@
 
 #define KPROCESS_DEAD			0x1
 #define KPROCESS_SYSTEM			0x2
-	
-typedef struct _LL {
-	struct _LL			*next;
-	struct _LL			*prev;
-} LL;
 	
 typedef struct _MWSR {
 	LL				*deallocw;

@@ -79,7 +79,7 @@ def makeModule(cfg, dir, out):
 	# the -N switch has to prevent the file_offset in the elf32 from being
 	# equal to the VMA address which was bloating the modules way too much
 	# now they should be aligned to a 4K boundary or something similar
-	if executecmd(dir, '%s -T ../../module.link -L%s -N -o ../%s.mod ../../atomicsh.o ../../corelib/core.o ../../corelib/rb.o %s -lgcc' % (cfg['LD'], cfg['LIBGCCPATH'], out, objs), cmdshow=cfg['cmdshow']) is False:
+	if executecmd(dir, '%s -T ../../module.link -L%s -N -o ../%s.mod ../../corelib/linklist.o ../../corelib/kheap_bm.o ../../corelib/atomicsh.o ../../corelib/core.o ../../corelib/rb.o %s -lgcc' % (cfg['LD'], cfg['LIBGCCPATH'], out, objs), cmdshow=cfg['cmdshow']) is False:
 		return False
 	#if executecmd(dir, '%s -S ../%s.mod ../%s.mod' % (cfg['OBJCOPY'], out, out), cmdshow=cfg['cmdshow']) is False:
 	#	return False
@@ -92,9 +92,18 @@ def compileCoreLIB(cfg, dir):
 def makeKernel(cfg, dir, out, bobjs):
 	print(bcolors.HEADER + bcolors.OKGREEN + 'kernel-compile' + bcolors.ENDC)
 	# compile all source files
+	old_ccflags = cfg['CCFLAGS'] 
+	cfg['CCFLAGS'] = '%s -DKERNEL' % cfg['CCFLAGS']
+	
+	if executecmd(dir, '%s %s -c %s %s' % (cfg['CC'], cfg['CCFLAGS'], './corelib/kheap_bm.c', ''), cmdshow=cfg['cmdshow']) is False:
+		cfg['CCFLAGS'] = old_ccflags
+		return False
+	
 	res, objs = compileDirectory(cfg, dir)
+	cfg['CCFLAGS'] = old_ccflags
 	if res is False:
 		return False
+	
 	
 	# make sure main.o is linked first
 	_objs = []
@@ -111,7 +120,7 @@ def makeKernel(cfg, dir, out, bobjs):
 	# link it
 	# %s/libgcc.a
 	#  cfg['LIBGCCPATH'],-L%s
-	if executecmd(dir, '%s -T link.ld -o %s main.o -L%s ./corelib/rb.o %s %s -lgcc' % (cfg['LD'], tmp, cfg['LIBGCCPATH'], objs, bobjs), cmdshow=cfg['cmdshow']) is False:
+	if executecmd(dir, '%s -T link.ld -o %s main.o -L%s ./corelib/linklist.o ./corelib/atomicsh.o ./corelib/rb.o %s %s -lgcc' % (cfg['LD'], tmp, cfg['LIBGCCPATH'], objs, bobjs), cmdshow=cfg['cmdshow']) is False:
 		return False
 	# strip it
 	if executecmd(dir, '%s -j .text -O binary %s %s' % (cfg['OBJCOPY'], tmp, out), cmdshow=cfg['cmdshow']) is False:
@@ -124,7 +133,8 @@ def make(cfg):
 	board = cfg['board']
 	modules= cfg['modules']
 	# compile corelib
-	compileCoreLIB(cfg, dir = './corelib')
+	if compileCoreLIB(cfg, dir = './corelib') is False:
+		return False
 
 	# special object used by modules
 	# TODO: fix cant find CC executable
@@ -186,7 +196,7 @@ cfg['CC'] = 'arm-eabi-gcc'
 cfg['LD'] = 'arm-eabi-ld'
 cfg['AR'] = 'arm-eabi-ar'
 cfg['OBJCOPY'] = 'arm-eabi-objcopy'
-cfg['CCFLAGS'] = '-save-temps -save-temps=cwd -Os -mcpu=cortex-a9 -fno-builtin-printf -fno-builtin-sprintf -fno-builtin-memset'
+cfg['CCFLAGS'] = '-save-temps -save-temps=cwd -O3 -mcpu=cortex-a9 -fno-builtin-free -fno-builtin-printf -fno-builtin-sprintf -fno-builtin-memset'
 cfg['hdrpaths'] = ['../../', '../', './corelib/']
 cfg['dirofboards'] = './boards'
 cfg['dirofmodules'] = './modules'
@@ -194,7 +204,7 @@ cfg['board'] = 'realview-pb-a'
 cfg['modules'] = ['testuelf', 'fs']
 cfg['kimg'] = './armos.bin'
 cfg['ldflags'] = ''
-cfg['cmdshow'] = False
+cfg['cmdshow'] = True
 cfg['LIBGCCPATH'] = '/home/kmcguire/opt/cross/lib/gcc/arm-eabi/4.8.2/'
 
 def showHelp():
@@ -237,5 +247,5 @@ else:
 		cfg['modules'] = mods
 		if make(cfg) is False:
 			exit(-1)
-		exit(0)
+		exit()
 	showHelp()

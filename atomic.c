@@ -39,7 +39,7 @@ int katomic_lockspin_yield(volatile KATOMIC_CCLOCK *ptr, uint32 id) {
 
 	cyclecnt = 0;
 	while (!katomic_locktake32(&ptr->lock, 0, id) || ptr->lock != id) {
-		asm("swi %[code]" : : [code]"i" (KSWI_YEILD));
+		asm("swi %[code]" : : [code]"i" (KSWI_YIELD));
 		cyclecnt++;
 		if (cyclecnt > 400) {
 			kprintf("WHOA-THIS-YIELD-LOCK-TAKING-A-LONG-TIME lock:%x id:%x myid:%x", ptr, ptr->lock, id);

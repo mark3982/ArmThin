@@ -36,7 +36,6 @@ int k_heapBMAddBlockEx(KHEAPBM *heap, uintptr addr, uint32 size, uint32 bsize, K
 
 	bcnt = size / bsize;
 	
-	kprintf("bcnt:%x bm:%x size:%x bsize:%x\n", bcnt, bm, size, bsize);
 	/* clear bitmap */
 	for (x = 0; x < bcnt; ++x) {
 		bm[x] = 0;
@@ -56,7 +55,6 @@ int k_heapBMAddBlockEx(KHEAPBM *heap, uintptr addr, uint32 size, uint32 bsize, K
 	b->lfb = bcnt - 1;
 	
 	b->used = bcnt;
-	kprintf("HEREZ bcnt:%x b->used:%x b->lfb:%x\n", bcnt, b->used, b->lfb);
 	
 	KCCEXIT(&heap->lock);
 	return 1;
@@ -87,7 +85,6 @@ void *k_heapBMAllocBound(KHEAPBM *heap, uint32 size, uint32 bound) {
 	/* iterate blocks */
 	for (b = heap->fblock; b; b = b->next) {
 		/* check if block has enough room */\
-		kprintf("bmalloc:%x; b:%x b->size:%x b->used:%x size:%x\n", heap, b, b->size, b->used * b->bsize, size);
 		if (b->size - (b->used * b->bsize) >= size) {
 			bcnt = b->size / b->bsize;		
 			bneed = (size / b->bsize) * b->bsize < size ? size / b->bsize + 1 : size / b->bsize;
@@ -147,7 +144,6 @@ void k_heapBMSet(KHEAPBM *heap, uintptr ptr, uintptr size, uint8 rval) {
 	uint32				max;
 	
 	KCCENTER(&heap->lock);
-	kprintf("k_heapBMSet; heap:%x ptr:%x size:%x\n", heap, ptr, size);
 	for (b = heap->fblock; b; b = b->next) {
 		/* check if region effects block */
 		if (
@@ -188,7 +184,6 @@ void k_heapBMSet(KHEAPBM *heap, uintptr ptr, uintptr size, uint8 rval) {
 			}
 			
 			/* update free block count */
-			kprintf("ei:%x bi:%x\n", ei, bi);
 			if (rval == 0) {
 				b->used -= ei - bi;
 			} else {

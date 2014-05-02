@@ -102,6 +102,7 @@ int main() {
 	uint32			stack[32];
 	uintptr			dirproc;
 	uintptr			dirthread;
+	uintptr			dirsignal;
 	
 	smmio = (unsigned int*)0xa0000000;
 	
@@ -156,6 +157,7 @@ int main() {
 			/* establish connection to directory service */
 			dirproc = pkt[3];
 			dirthread = pkt[4];
+			dirsignal = pkt[7];
 			break;
 		}
 		
@@ -187,6 +189,8 @@ int main() {
 	/* write to shared memory to trigger response */
 	printf("writting to %x\n", pkt[2]);
 	((uint32*)pkt[2])[0] = 0xdeedbeef;
+	/* set signal for directory to notify it which IPC connection to read from */
+	signal(dirproc, dirthread, dirsignal);	
 	
 	for (;;);
 	return 0;

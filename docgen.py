@@ -1,5 +1,6 @@
 import os
 import sys
+import pprint
 
 
 '''
@@ -28,6 +29,7 @@ function randomhtmlcolor(max) {
 
 function randomizestyle() {
 	var			i, x, ss;
+	var			h;
 	
 	for (i = 0; i < document.styleSheets.length; ++i) {
 		if (document.styleSheets[i]['rules'])
@@ -128,7 +130,7 @@ def tokenize(file):
 	cl_ws = [' ', '\n', '\t']
 	cl_eol = ['\n']
 	cl_ge = ['"', "'", '/']
-	cl_sp = [',', '*', '-', '+', '%', '^', '&', '~', '=', '!', '.', '>', '<', '(', ')', '<', '>', '{', '}', ';', ':', '?']
+	cl_sp = [',', '*', '-', '+', '%', '^', '&', '~', '=', '!', '.', '>', '<', '(', ')', '<', '>', '{', '}', ';', ':', '?', '[', ']']
 	
 	tokens = []
 	
@@ -136,9 +138,9 @@ def tokenize(file):
 	while True:
 		# read up any non-white space
 		blk, x = readthese(buf, x, cl_ws + cl_ge + cl_sp, [], False)
+		blk = blk.strip()
 		if len(blk) > 0:
 			tokens.append(blk)
-		#s	print(blk, end=' ')
 		blk = None
 		
 		if x >= len(buf):
@@ -159,11 +161,16 @@ def tokenize(file):
 		elif buf[x] == '/':
 			if x + 1 >= len(buf):
 				return tokens
-			if buf[x + 1] == '*':
-				# read comment
-				ei = buf.find('*/', x)
+			if buf[x + 1] == '/':
+				# read single line comment
+				ei = buf.find('\n', x)
+				blk = buf[x:ei]
 				x = ei + 1
+			elif buf[x + 1] == '*':
+				# read block comment
+				ei = buf.find('*/', x)
 				blk = buf[x:ei + 2]
+				x = ei + 1
 				comcnt = comcnt + 1
 			else:
 				blk = '/'
@@ -188,6 +195,41 @@ def grabnested(toks, x):
 		x = x + 1
 	return (out, x)
 	
+def parseInfo(info):
+	# drop all extra padding, spaces, and EOLs
+	lsz = -1
+	info = info.replace('/*', '')
+	info = info.replace('*/', '')
+	while len(info) != lsz:
+		lsz = len(info)
+		info = info.replace('\n', ' ')
+		info = info.replace('  ', '')
+		info = info.replace('	', '')
+		info = info.replace('\r', '')
+	parts = info.split('@')
+	
+	info = {}
+	for part in parts:
+		part = part.split(':')
+		if len(part) < 2 and part[0] == '':
+			continue
+		_info = info
+		__info = info
+		__key = None
+		x = 0
+		while x < len(part) - 1:
+			sp = part[x]
+			_info[sp] = {}
+			__info = _info
+			__key = sp
+			_info = _info[sp]
+			x = x + 1
+		if __key:
+			__info[__key] = part[x]
+		else:
+			__info[part[0]] = True
+	return info
+	
 def process(file):
 	global forcnt, whilecnt, ifcnt, assigncnt, codestates
 
@@ -196,6 +238,7 @@ def process(file):
 	out = {}
 	out['calls'] = {}
 	out['imps'] = {}
+	out['calls-per-function'] = {}
 	
 	toks = tokenize(file)
 	
@@ -215,24 +258,51 @@ def process(file):
 			while y > -1:
 				if toks[y] == '(':
 					call, z = readthese(toks[y - 1], 0, [], [isvalidfuncname], True)
+					print('got %s' % call)
+					info = {}
 					if len(call) > 0 and call not in ['for', 'white', 'if']:
-						out['imps'][call] = (None, None)
+						z = y
+						while z > -1:
+							if toks[z][0] == '}':
+								break
+							if toks[z][0:2] == '/*':
+								info = toks[z]
+								info = parseInfo(info)
+								break
+							z = z -1
+					print('made info for %s' % call)
+					out['imps'][call] = info
 					break
 				y = y - 1
 			# walk through nested { } characters
+			_call = call		# hehe bad fix
 			nested = 1
 			x = x + 1
 			sub, x = grabnested(toks, x)
 			# run through sub looking for calls
 			y = 0
+			print('@@@@%s' % _call)
+			out['imps'][_call]['branch'] = 0
+			out['imps'][_call]['ops'] = 0
+			out['calls-per-function'][_call] = []
 			while y < len(sub):
+				# count branch type instructions
+				if sub[y] in ['if', 'for', 'while', 'case']:
+					out['imps'][_call]['branch'] = out['imps'][_call]['branch'] + 1
+				# count major operations
+				if sub[y] in ['+', '-', '*', '/', '%', '=', '~', '^', '&', '[', '>', '<']:
+					out['imps'][_call]['ops'] = out['imps'][_call]['ops'] + 1
+				# read this call
 				if sub[y] == '(':
 					call, z = readthese(sub[y - 1], 0, [], [isvalidfuncname], True)
-					if len(call) > 0 and call not in ['for', 'while', 'if']:
+					if len(call) > 0 and call not in ['for', 'while', 'if', 'switch', 'asm']:
+						# track/count calls from this module (not per function)
 						if call in out['calls']:
 							out['calls'][call] = out['calls'][call] + 1
 						else:
 							out['calls'][call] = 1
+						# track calls per function
+						out['calls-per-function'][_call].append(call)
 					else:
 						if call == 'for':
 							forcnt = forcnt + 1
@@ -256,9 +326,7 @@ def gendir(meta, cfg, dir, level = 0):
 		# handle directories
 		if os.path.isdir('%s/%s' % (dir, node)):
 			print('%sgoing into %s' % (level * levelpad, node))
-			if node == 'boards':
-				print('inside boards')
-				gendir(meta, cfg, '%s/%s' % (dir, node), level = level + 1)
+			gendir(meta, cfg, '%s/%s' % (dir, node), level = level + 1)
 		# handle different file types
 		ext = node[node.find('.') + 1:]
 		base = node[0:node.find('.')]
@@ -275,7 +343,24 @@ def gendir(meta, cfg, dir, level = 0):
 				nsname = nsname[1:]
 			
 			meta[nsname] = process('%s/%s' % (dir, node))
+
+def buildtable(rows, tablestyle = ''):
+	out = []
 	
+	out.append('<table style="%s">' % tablestyle)
+	for row in rows:
+		out.append('<tr>')
+		for col in row:
+			if type(col) in [list, tuple]:
+				out.append(buildtable(col[0], tablestyle=col[1]))
+				print('style', col[1])
+			else:
+				out.append('<td>%s</td>' % col)
+		out.append('</tr>')
+	out.append('</table>')
+	return ''.join(out)
+	
+
 def gen(cfg, dir):
 	meta = {}
 	
@@ -288,15 +373,41 @@ def gen(cfg, dir):
 	
 	
 	fd.write('<html><head><style>')
-	fd.write('body { background: black; }')
+	fd.write('body { font-family: monospace; background: black; }')
 	fd.write('.module { font-size:16pt; color: #ffaaaa; }')
 	fd.write('.deps { font-size:12pt; color: #aaffaa; }')
-	fd.write('.imps { font-size:8pt; color: #aaaaaa; }')
+	fd.write('.imps { font-size:10pt; color: #aaaaaa; }')
+	fd.write('.sdescription { font-size:8pt; color: #aaaaaa; }')
+	#fd.write('table { border: 1px line #cccccc; }')
+	#fd.write('tr { border: 1px line #cccccc; }')
+	#fd.write('td { border: 1px line #cccccc; }')
 	fd.write('</style></head></body>')
 	fd.write('<script language="javascript">%s</script>' % sblock);
 	
 	fc = 0
 	cc = 0
+	
+	mtable = []
+	
+	fcg = {}
+	ml = {}
+	
+	for m in meta:
+		fmeta = meta[m]
+
+		for imp in fmeta['imps']:
+			fcg[imp] = {}
+			for cff in fmeta['calls-per-function'][imp]:
+				if cff in fcg[imp]:
+					# backwards link
+					fcg[imp][cff] = fcg[imp]
+				else:
+					# forward link
+					fcg[imp][cff] = {}
+					fcg[cff] = fcg[imp][cff]
+	
+	pprint.pprint(fcg)
+	exit()
 	
 	for m in meta:
 		fmeta = meta[m]
@@ -315,15 +426,44 @@ def gen(cfg, dir):
 						fmeta['deps'][_m] = fmeta['deps'][_m] + 1
 					else:
 						fmeta['deps'][_m] = 1
+				
 		tmp = []
 		for dep in fmeta['deps']:
 			tmp.append('%s:%s' % (dep, fmeta['deps'][dep]))
-		fd.write('<span class="module">%s</span> <span class="deps">%s</span></br>\n' % (m, ' '.join(tmp)))
+			
 		# display imps
+		mrow = []
+		
+		mrow.append('<span class="module">%s</span> ' % m);
+		mrow.append('<span class="deps">%s</span>' % ' '.join(tmp))
+		
+		mtable.append(mrow)
+		
+		mrow = []
+		tbl = []	
+		tbl.append(['<b>FUNCTION</b>', '<b>BRANCH</b>', '<b>OPS</b>', '<b>DESCRIPTION</b>'])
 		for call in fmeta['imps']:
+			if len(call.strip()) < 1:
+				continue
+			row = []
+			info = fmeta['imps'][call]
+			if 'sdescription' in info:
+				sdescription = info['sdescription']
+			else:
+				sdescription = ''
 			fc = fc + 1
-			fd.write('\t\t<span class="imps">%s</span> \n' % call)
-		fd.write('</br>')
+			row.append('<span class="imps">%s</span>' %  call)
+			row.append('<span class="sdescription">%s</span>' % info['branch'])
+			row.append('<span class="sdescription">%s</span>' % info['ops'])
+			row.append('<span class="sdescription">%s</span>' % sdescription)
+			tbl.append(row)
+		
+		if len(tbl) > 0:
+			mrow.append([tbl, 'border: 1px line white;'])
+		mtable.append(mrow)
+		
+	fd.write(buildtable(mtable, tablestyle='border: 1px line white;'))
+		
 	fd.write('</body></html>')
 	fd.close()
 	
