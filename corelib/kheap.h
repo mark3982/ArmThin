@@ -2,7 +2,7 @@
 #define ARMOS_KH_KHEAP
 #include "stdtypes.h"
 #ifdef KERNEL
-#include "atomic.h"
+#include "../atomic.h"
 #endif
 
 /*

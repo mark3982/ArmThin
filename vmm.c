@@ -296,6 +296,13 @@ static int kvmm2_get1Ktable(uintptr *o, uint32 flags) {
 				PANIC("(slot << 30) > KMEMSIZE");
 				return 0;
 			}
+			/* TODO:
+				This might be a special case here, but what is happening is I original
+				made it where I could allocate 1K blocks with my physical memory manager
+				but maybe there is a better way here, like go ahead and allocate 4K then
+				take remaining 3K and stick in 1K stack below. Then, if I do that I could
+				up the minimum block size of the manager back up to 4K from 1K.
+			*/
 			ptaddr = (uint32*)k_heapBMAllocBound(&ks->hphy, 1024, 10);
 			t[slot] = (uintptr)ptaddr | TLB_COARSE;
 			if (!(flags & KVMM_DIRECT)) {

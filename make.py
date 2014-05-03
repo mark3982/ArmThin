@@ -86,6 +86,7 @@ def makeModule(cfg, dir, out):
 	pass
 	
 def compileCoreLIB(cfg, dir):
+	print(bcolors.HEADER + bcolors.OKGREEN + 'CORELIB-compile' + bcolors.ENDC)
 	res, objs = compileDirectory(cfg, dir)
 	return res
 
@@ -95,7 +96,7 @@ def makeKernel(cfg, dir, out, bobjs):
 	old_ccflags = cfg['CCFLAGS'] 
 	cfg['CCFLAGS'] = '%s -DKERNEL' % cfg['CCFLAGS']
 	
-	if executecmd(dir, '%s %s -c %s %s' % (cfg['CC'], cfg['CCFLAGS'], './corelib/kheap_bm.c', ''), cmdshow=cfg['cmdshow']) is False:
+	if executecmd(dir, '%s %s -c %s' % (cfg['CC'], cfg['CCFLAGS'], './corelib/kheap_bm.c'), cmdshow=cfg['cmdshow']) is False:
 		cfg['CCFLAGS'] = old_ccflags
 		return False
 	
@@ -108,7 +109,6 @@ def makeKernel(cfg, dir, out, bobjs):
 	# make sure main.o is linked first
 	_objs = []
 	for obj in objs:
-		print('obj', obj)
 		if obj != 'main.o':
 			_objs.append(obj)
 	objs = _objs
@@ -120,7 +120,7 @@ def makeKernel(cfg, dir, out, bobjs):
 	# link it
 	# %s/libgcc.a
 	#  cfg['LIBGCCPATH'],-L%s
-	if executecmd(dir, '%s -T link.ld -o %s main.o -L%s ./corelib/linklist.o ./corelib/atomicsh.o ./corelib/rb.o %s %s -lgcc' % (cfg['LD'], tmp, cfg['LIBGCCPATH'], objs, bobjs), cmdshow=cfg['cmdshow']) is False:
+	if executecmd(dir, '%s -T link.ld -o %s main.o -L%s ./corelib/kheap_bm.o ./corelib/linklist.o ./corelib/atomicsh.o ./corelib/rb.o %s %s -lgcc' % (cfg['LD'], tmp, cfg['LIBGCCPATH'], objs, bobjs), cmdshow=cfg['cmdshow']) is False:
 		return False
 	# strip it
 	if executecmd(dir, '%s -j .text -O binary %s %s' % (cfg['OBJCOPY'], tmp, out), cmdshow=cfg['cmdshow']) is False:
@@ -204,7 +204,7 @@ cfg['board'] = 'realview-pb-a'
 cfg['modules'] = ['testuelf', 'fs']
 cfg['kimg'] = './armos.bin'
 cfg['ldflags'] = ''
-cfg['cmdshow'] = True
+cfg['cmdshow'] = False
 cfg['LIBGCCPATH'] = '/home/kmcguire/opt/cross/lib/gcc/arm-eabi/4.8.2/'
 
 def showHelp():

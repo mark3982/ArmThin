@@ -13,8 +13,10 @@ from osdev.org
 	Brendan, Combuster
 	
 special thanks:
-	geist		-		helping with:
-							performance and general help
-							cache and coherency
-	mrvn		-		helping with IPC and servicing HW interrupts
-	reavengray	-		helping with keeping me grounded in realiable/proven designs
+	geist		-	helping with:
+					performance and general help
+					cache and coherency
+					VMSAv6, VMSAv7, VMSAv8
+	mrvn		-	helping with IPC and servicing HW interrupts
+	reavengray	-	helping with keeping me grounded in 
+				realiable/proven designs
