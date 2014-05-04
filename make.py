@@ -58,9 +58,12 @@ def compileDirectory(cfg, dir):
 		ext = node[node.find('.') + 1:]
 		base = node[0:node.find('.')]
 		if ext == 'c':
-			print('    [CC] %s' % (node))
-			if executecmd(dir, '%s %s -c %s %s' % (cfg['CC'], cfg['CCFLAGS'], node, hdrpaths), cmdshow=cfg['cmdshow']) is False:
-				return (False, objs)
+			if not isNewerThan('%s/%s.o' % (dir, base), '%s/%s.c' % (dir, base)):
+				print('    [CC] %s' % (node))
+				if executecmd(dir, '%s %s -c %s %s' % (cfg['CC'], cfg['CCFLAGS'], node, hdrpaths), cmdshow=cfg['cmdshow']) is False:
+					return (False, objs)
+			else:
+				print('    [GOOD] %s' % (node))
 			objs.append('%s.o' % base)
 	return (True, objs)
 
@@ -89,6 +92,11 @@ def compileCoreLIB(cfg, dir):
 	print(bcolors.HEADER + bcolors.OKGREEN + 'CORELIB-compile' + bcolors.ENDC)
 	res, objs = compileDirectory(cfg, dir)
 	return res
+
+def isNewerThan(obj, source):
+	if os.path.getmtime(obj) > os.path.getmtime(source):
+		return True
+	return False
 
 def makeKernel(cfg, dir, out, bobjs):
 	print(bcolors.HEADER + bcolors.OKGREEN + 'kernel-compile' + bcolors.ENDC)
