@@ -65,6 +65,7 @@ int katomic_lockspin_wfe(volatile KATOMIC_CCLOCK *ptr, uint32 id) {
 	uint32 volatile cyclecnt;
 
 	cyclecnt = 0;
+	//kprintf("katomic_lockspin_wfe trying to lock ptr->lock:%x id:%x\n", ptr->lock, id);
 	while (!katomic_locktake32(&ptr->lock, 0, id) || ptr->lock != id) {
 		asm volatile ("wfe");
 		cyclecnt++;

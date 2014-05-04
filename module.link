@@ -1,0 +1,15 @@
+ENTRY(_start)
+
+SECTIONS
+{
+	. = BLOCK(0);
+    . = 0x80000000;
+	_BOI = .;
+    .text ALIGN(0) : { *(.text*) }
+	.rodata ALIGN(0) : { *(.rodata*) }
+	.data ALIGN(0) : { *(.data*) }
+	.bss ALIGN(0) : { *(.bss*) }
+	COMMON ALIGN(0) : { *(COMMON*) }
+	_EOI = .;
+	///DISCARD/ : { *(*) }
+}

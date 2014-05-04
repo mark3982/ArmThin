@@ -75,15 +75,15 @@ int linkhelper_tick() {
 	
 	/* read any packets in our buffer */
 	sz = sizeof(pkt);
-	printf("[directory] checking for packets from kernel thread\n");
+	printf("[corelib] [linkhelper] checking for packets from kernel thread\n");
 	while (er_read_nbio(&__corelib_rx, &pkt[0], &sz)) {
-		printf("[directory] got pkt type:%x\n", pkt[0]);
+		printf("[corelib] [linkhelper] got pkt type:%x\n", pkt[0]);
 		switch (pkt[0]) {
 			case KMSG_THREADMESSAGE:
-				printf("[directory] got message %x\n", pkt[1]);
+				printf("[corelib] [linkhelper] got message %x\n", pkt[1]);
 				break;
 			case KMSG_REQSHARED:
-				printf("[directory] got REQSHARED\n");
+				printf("[corelib] [linkhelper] got REQSHARED\n");
 				
 				//app_kmsg_reqshared(
 				
@@ -92,7 +92,7 @@ int linkhelper_tick() {
 				pkt[1] = 0x34;				/* set our RID */
 				pkt[7] = 1;					/* set our signal */
 				if (!er_write_nbio(&__corelib_tx, &pkt[0], sz)) {
-					printf("[directory] write failed\n");
+					printf("[corelib] [linkhelper] write failed\n");
 				}
 				notifykserver();
 				break;

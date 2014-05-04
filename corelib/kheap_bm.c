@@ -1,6 +1,11 @@
 #include "kheap.h"
 
+#ifdef KERNEL
+#define printf kprintf
+#endif
+
 void k_heapBMInit(KHEAPBM *heap) {
+	memset(heap, 0, sizeof(KHEAPBM));
 	heap->fblock = 0;
 }
 
@@ -9,6 +14,11 @@ int k_heapBMAddBlock(KHEAPBM *heap, uintptr addr, uint32 size, uint32 bsize) {
 	uintptr					bmsz;
 	uint8					*bm;
 
+	#ifndef KERNEL
+	((uint32*)0xa0000000)[0] = '^';
+	#endif
+	
+	printf("@inside\n");
 	b = (KHEAPBLOCKBM*)addr;
 	bmsz = k_heapBMGetBMSize(size, bsize);
 	bm = (uint8*)(addr + sizeof(KHEAPBLOCKBM));
@@ -24,7 +34,11 @@ int k_heapBMAddBlockEx(KHEAPBM *heap, uintptr addr, uint32 size, uint32 bsize, K
 	uint32				bcnt;
 	uint32				x;
 	
+	printf("taking lock\n");
+	
 	KCCENTER(&heap->lock);
+	
+	printf("setup block\n");
 	
 	b->size = size;
 	b->bsize = bsize;
@@ -34,14 +48,17 @@ int k_heapBMAddBlockEx(KHEAPBM *heap, uintptr addr, uint32 size, uint32 bsize, K
 	b->next = heap->fblock;
 	heap->fblock = b;
 
+	printf("size:%x bsize:%x\n", size, bsize);
+	
 	bcnt = size / bsize;
 	
+	printf("clearing bitmap bm:%x bcnt:%x\n", bm, bcnt);
 	/* clear bitmap */
 	for (x = 0; x < bcnt; ++x) {
 		bm[x] = 0;
 		//kprintf("&bm[x]:%x x:%x bcnt:%x\n", &bm[x], x, bcnt);
 	}
-
+	printf("done clearing bitmap\n");
 	bcnt = (bcnt / bsize) * bsize < bcnt ? bcnt / bsize + 1 : bcnt / bsize;
 	
 	/* if BM is not inside leave this space avalible */
@@ -78,6 +95,8 @@ void *k_heapBMAllocBound(KHEAPBM *heap, uint32 size, uint32 bound) {
 	uint32				bneed;
 	uint8				nid;
 	uint32				max;
+	
+	printf("k_heapBMAllocBound\n");
 	
 	KCCENTER(&heap->lock);
 	

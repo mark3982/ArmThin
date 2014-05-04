@@ -96,7 +96,7 @@ def makeKernel(cfg, dir, out, bobjs):
 	old_ccflags = cfg['CCFLAGS'] 
 	cfg['CCFLAGS'] = '%s -DKERNEL' % cfg['CCFLAGS']
 	
-	if executecmd(dir, '%s %s -c %s' % (cfg['CC'], cfg['CCFLAGS'], './corelib/kheap_bm.c'), cmdshow=cfg['cmdshow']) is False:
+	if executecmd(dir, '%s %s -c %s -o ./corelib/kheap_bm_kernel.o' % (cfg['CC'], cfg['CCFLAGS'], './corelib/kheap_bm.c'), cmdshow=cfg['cmdshow']) is False:
 		cfg['CCFLAGS'] = old_ccflags
 		return False
 	
@@ -120,7 +120,7 @@ def makeKernel(cfg, dir, out, bobjs):
 	# link it
 	# %s/libgcc.a
 	#  cfg['LIBGCCPATH'],-L%s
-	if executecmd(dir, '%s -T link.ld -o %s main.o -L%s ./corelib/kheap_bm.o ./corelib/linklist.o ./corelib/atomicsh.o ./corelib/rb.o %s %s -lgcc' % (cfg['LD'], tmp, cfg['LIBGCCPATH'], objs, bobjs), cmdshow=cfg['cmdshow']) is False:
+	if executecmd(dir, '%s -T link.ld -o %s main.o -L%s ./corelib/kheap_bm_kernel.o ./corelib/linklist.o ./corelib/atomicsh.o ./corelib/rb.o %s %s -lgcc' % (cfg['LD'], tmp, cfg['LIBGCCPATH'], objs, bobjs), cmdshow=cfg['cmdshow']) is False:
 		return False
 	# strip it
 	if executecmd(dir, '%s -j .text -O binary %s %s' % (cfg['OBJCOPY'], tmp, out), cmdshow=cfg['cmdshow']) is False:
@@ -163,7 +163,10 @@ def make(cfg):
 		# be architecture specific use inline assembly which would fail and clutter
 		# up the output with errors.. unless we change the way we handle things
 		print((bcolors.HEADER + bcolors.OKGREEN + 'board-make [%s]' + bcolors.ENDC) % (bdir))
+		oldcc = cfg['CCFLAGS']
+		cfg['CCFLAGS'] = '%s -DKERNEL' % cfg['CCFLAGS']
 		res, objs = compileDirectory(cfg = cfg, dir = '%s/%s' % (cfg['dirofboards'], bdir))
+		cfg['CCFLAGS'] = oldcc
 		if res is False:
 			return False
 		# if this board module is to be included in the kernel then

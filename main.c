@@ -413,7 +413,7 @@ void ksched() {
 	*/
 	asm("mcr p15, #0, r0, c8, c7, #0");
 	
-	//kprintf("SWITCH-TO thread:%x cpsr:%x fp:%x sp:%x pc:%x dbgname:%s\n", kt, kt->cpsr, kt->r11, kt->sp, kt->pc, kt->dbgname);
+	kprintf("SWITCH-TO thread:%x cpsr:%x fp:%x sp:%x pc:%x dbgname:%s\n", kt, kt->cpsr, kt->r11, kt->sp, kt->pc, kt->dbgname);
 	
 	//uint32			*p;
 	

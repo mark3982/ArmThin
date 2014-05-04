@@ -242,21 +242,22 @@ uintptr __attribute__((naked)) valloc(uintptr cnt) {
 
 void __attribute__((naked)) vfree(uintptr addr, uintptr cnt) {
 	asm volatile (
-			"swi %[code]\n"
-			"bx lr\n"
-			: : [code]"i" (KSWI_VFREE)
+		"swi %[code]\n"
+		"bx lr\n"
+		: : [code]"i" (KSWI_VFREE)
 	);
 }
 
 int __attribute__((naked)) getvirtref(uintptr v) {
 	asm volatile (
-		"swi %[code]"
+		"swi %[code]\n"
+		"bx lr\n"
 		: : [code]"i" (KSWI_GETVIRTREF)
 	);
 }
 
 uintptr __attribute__((naked)) getpagesize() {
-	asm volatile ("swi %[code]" : : [code]"i" (KSWI_GETPAGESIZE));
+	asm volatile ("swi %[code]\nbx lr\n" : : [code]"i" (KSWI_GETPAGESIZE));
 }
 
 ERH				__corelib_rx;
@@ -312,17 +313,29 @@ void free(void *ptr) {
 
 void _start(uint32 rxaddr, uint32 txaddr, uint32 txrxsz) {
 	uintptr			heapoff;
+	uintptr			sp;
 
 	printf("rxaddr:%x txaddr:%x txrxsz:%x\n", rxaddr, txaddr, txrxsz);
 	
 	memset(&__corelib_rx, 0, sizeof(ERH));
 	memset(&__corelib_tx, 0, sizeof(ERH));
 	
+	//memset(&__tmp[0], 0, sizeof(__tmp));
+	
 	/* allocate initial heap at about 4 virtual pages with 16 byte blocks */
 	k_heapBMInit(&__corelib_heap);
 	heapoff = valloc(4);
+	printf("#heapoff:%x\n", heapoff);
+	((uint32*)heapoff)[0] = 0;
+	printf("fptr:%x\n", &k_heapBMAddBlock);
+	//printf("tmp:%x\n", &__tmp[0]);
+	printf("__corelib_heap:%x\n", &__corelib_heap);
+	//((uint32*)0xa0000000)[0] = '%';
+	asm volatile ("mov %[out], sp" : [out]"=r" (sp));
+	printf("sp:%x\n", sp);
 	k_heapBMAddBlock(&__corelib_heap, heapoff, 4 * getpagesize(), 16);
-	
+	printf("done adding heap block\n");
+		
 	/* ready our encapsulating structures for the kernel link */
 	er_ready(&__corelib_rx, (void*)rxaddr, txrxsz, 16 * 4, 0);
 	er_ready(&__corelib_tx, (void*)txaddr, txrxsz, 16 * 4, &katomic_lockspin_yield8nr);
