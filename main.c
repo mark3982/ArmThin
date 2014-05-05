@@ -344,9 +344,9 @@ void ksched() {
 					}
 				}
 				
-				//if (th->flags & KTHREAD_SLEEPING) {
-					//kprintf("SLEEPING timeleft:%x timeout:%x ctime:%x name:%s\n", th->timeout - ks->ctime, th->timeout, ks->ctime, th->dbgname ? th->dbgname : "unknown");
-				//}
+				if (th->flags & KTHREAD_SLEEPING) {
+					kprintf("SLEEPING timeleft:%x timeout:%x ctime:%x name:%s\n", th->timeout - ks->ctime, th->timeout, ks->ctime, th->dbgname ? th->dbgname : "unknown");
+				}
 				
 				/* if NOT sleeping  */
 				if (!(th->flags & KTHREAD_SLEEPING)) {
@@ -879,7 +879,10 @@ void k_exphandler(uint32 lr, uint32 type) {
 				break;
 			case KSWI_GETSIGNAL:
 				/* get one signal signal and return */
-				stk[-14] = mla_get(&th->signals, &out, &out2);
+				stk[-13] = 0;			/* just clearing them because the function does not */
+				stk[-12] = 0;			/* ... */
+				stk[-14] = mla_get(&cs->cthread->signals, &out, &out2);
+				kprintf("KSWI_GETSIGNAL thread:%x ret:%x process:%x signal:%x\n", cs->cthread, stk[-14], out, out2);
 				stk[-13] = out;			/* process */
 				stk[-12] = out2;		/* signal */
 				break;
@@ -894,6 +897,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 						for (th = proc->threads; th; th = th->next) {
 							if ((uint32)th == r1) {
 								/* found it now add signal */
+								kprintf("mla adding signal tprocess:%x tthread:%x signal:%x\n", proc, th, r2);
 								mla_add(&th->signals, (uintptr)cs->cproc, r2);
 								stk[-14] = 1;	/* change code to successful */
 								break;
@@ -1646,7 +1650,7 @@ void kthread(KTHREAD *myth) {
 						// pkt[4] - target process
 						// pkt[5] - target thread
 						// pkt[6] - target rid
-						// pkt[6] - signal to be used for acceptor (requestor asserts this signal)
+						// pkt[7] - signal to be used for acceptor (requestor asserts this signal)
 						// pkt[.] - extra data
 						/* double check process:thread exist and active request is outstanding */
 						if (kthread_threadverify((KPROCESS*)pkt[4], (KTHREAD*)pkt[5])) {

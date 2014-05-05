@@ -157,7 +157,6 @@ int main() {
 			/* establish connection to directory service */
 			dirproc = pkt[3];
 			dirthread = pkt[4];
-			dirsignal = pkt[7];
 			break;
 		}
 		
@@ -167,15 +166,17 @@ int main() {
 	
 	/* we have the directory service process:thread ID now try to open a connection */
 	pkt[0] = KMSG_REQSHARED;
-	pkt[1] = 0x12344321;
-	pkt[2] = addr;
-	pkt[3] = 1;
-	pkt[4] = dirproc;
-	pkt[5] = dirthread;
-	pkt[6] = 1;
-	pkt[7] = KPROTO_ENTRYRING;
-	pkt[8] = 4096 >> 1;
-	pkt[9] = 4096 >> 1;
+	pkt[1] = 0x12344321;			/* request id */
+	pkt[2] = addr;					/* address of memory */
+	pkt[3] = 1;						/* page count */
+	pkt[4] = dirproc;				/* target process */
+	pkt[5] = dirthread; 			/* target thread */
+	pkt[6] = 1;						/* signal we want used */
+	pkt[7] = KPROTO_ENTRYRING;		/* protocol to be used */
+	pkt[8] = 4096 >> 1;				/* size of rx */
+	pkt[9] = 4096 >> 1;				/* size of tx */
+	pkt[10] = 16 * 4;				/* size of rx entry */	
+	pkt[11] = 16 * 4;				/* size of tx entry */
 	/* send and wait for response from kserver */
 	er_waworr(&__corelib_tx, &__corelib_rx, &pkt[0], 10 * 4, 1, pkt[1], tps * 30);
 	printf("[testuelf] got response from kserver type:%x\n", pkt[0]);
@@ -185,6 +186,8 @@ int main() {
 		printf("[testuelf] timeout waiting for reply! HALTED\n");
 		for (;;);
 	}
+	
+	dirsignal = pkt[7];
 	
 	/* write to shared memory to trigger response */
 	printf("writting to %x\n", pkt[2]);

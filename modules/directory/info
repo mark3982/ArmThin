@@ -1,0 +1,1 @@
+This implements the RFS/VFS for the system, and provides applications the ability to locate resources.

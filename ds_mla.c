@@ -27,11 +27,14 @@ int mla_init(MLA *sb, uint32 dmax) {
 int mla_get(MLA *sb, uintptr *domain, uintptr *out) {
 	MLAB			*mlab;
 	uint32		x;
-	
+
+	kprintf("[mla_get] enter\n");
 	for (mlab = sb->blocks; mlab; mlab = mlab->next) {
 		if (mlab->used > 0) {
+			kprintf("[mla_get] mlab->used:%x > 0\n", mlab->used);
 			for (x = 0; x < mlab->max; ++x) {
 				if (mlab->slots[x]) {
+					kprintf("[mla_get] mlab->slots[%x]:%x != 0\n", x, mlab->slots[x]);
 					*out = mlab->slots[x];
 					mlab->slots[x] = 0;
 					mlab->used--;
@@ -41,6 +44,7 @@ int mla_get(MLA *sb, uintptr *domain, uintptr *out) {
 		}
 	}
 	
+	*domain = 0;
 	*out = 0;
 	return 0;
 }

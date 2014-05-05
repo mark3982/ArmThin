@@ -20,6 +20,19 @@ void memset(void *p, uint8 v, uintptr sz) {
 	
 	return;
 }
+
+void memcpy(void *_a, void *_b, uintptr sz) {
+	uint8		*a;
+	uint8		*b;
+	uintptr		x;
+	
+	a = (uint8*)_a;
+	b = (uint8*)_b;
+	
+	for (x = 0; x < sz; ++x) {
+		a[x] = b[x];
+	}
+}
  
 uint32 __rand(uint32 next) {
     next = next * 1103515245 + 12345;
@@ -139,11 +152,13 @@ void sprintf(char *buf, const char *fmt, ...) {
 
 int __attribute__((naked)) signal(uintptr proc, uintptr thread, uintptr signal) {
 	asm volatile (
-		"swi %[code]" 
+		"swi %[code]\n"
+		"bx lr\n"
 		: : [code]"i" (KSWI_SIGNAL)
 	);
 }
 
+//r0, r1, r2
 int __attribute__((naked)) getsignal(uintptr *process, uintptr *signal) {
 	asm volatile (
 		"push {r3, r4}\n"
@@ -153,6 +168,7 @@ int __attribute__((naked)) getsignal(uintptr *process, uintptr *signal) {
 		"str r1, [r3]\n"
 		"str r2, [r4]\n"
 		"pop {r3, r4}\n"
+		"bx lr\n"
 		: : [code]"i" (KSWI_GETSIGNAL)
 	);
 }
@@ -194,15 +210,11 @@ int sleep(uint32 timeout) {
 	int			result;
 	uint32		tps;
 	
-	printf("0:CORE:SLEEP START\n");
 	/* convert to ticks */
 	tps = getTicksPerSecond();
 	
-	printf("1:CORE:SLEEP timeout:%x tps:%x\n", timeout, tps);
 	timeout = timeout * tps;
-	printf("2:CORE:SLEEP timeout:%x\n", timeout);
 	
-	printf("3:CORE:SLEEP\n");
 	result = sleepticks(timeout);
 	/* convert from ticks */
 	return result / tps;
@@ -311,6 +323,10 @@ void free(void *ptr) {
 	k_heapBMFree(&__corelib_heap, ptr);
 }
 
+/*
+	@sdescription:		The entry point for the application.
+	@ldescription:		This sets up the kernel IPC link, and heap.
+*/
 void _start(uint32 rxaddr, uint32 txaddr, uint32 txrxsz) {
 	uintptr			heapoff;
 	uintptr			sp;

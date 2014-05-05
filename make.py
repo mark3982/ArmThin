@@ -82,7 +82,7 @@ def makeModule(cfg, dir, out):
 	# the -N switch has to prevent the file_offset in the elf32 from being
 	# equal to the VMA address which was bloating the modules way too much
 	# now they should be aligned to a 4K boundary or something similar
-	if executecmd(dir, '%s -T ../../module.link -L%s -N -o ../%s.mod ../../corelib/linklist.o ../../corelib/kheap_bm.o ../../corelib/atomicsh.o ../../corelib/core.o ../../corelib/rb.o %s -lgcc' % (cfg['LD'], cfg['LIBGCCPATH'], out, objs), cmdshow=cfg['cmdshow']) is False:
+	if executecmd(dir, '%s -T ../../module.link -L%s -N -o ../%s.mod ../../corelib/linkhelper.o ../../corelib/linklist.o ../../corelib/kheap_bm.o ../../corelib/atomicsh.o ../../corelib/core.o ../../corelib/rb.o %s -lgcc' % (cfg['LD'], cfg['LIBGCCPATH'], out, objs), cmdshow=cfg['cmdshow']) is False:
 		return False
 	#if executecmd(dir, '%s -S ../%s.mod ../%s.mod' % (cfg['OBJCOPY'], out, out), cmdshow=cfg['cmdshow']) is False:
 	#	return False
@@ -94,6 +94,8 @@ def compileCoreLIB(cfg, dir):
 	return res
 
 def isNewerThan(obj, source):
+	if os.path.exists(obj) is False:
+		return False
 	if os.path.getmtime(obj) > os.path.getmtime(source):
 		return True
 	return False
@@ -207,7 +209,7 @@ cfg['CC'] = 'arm-eabi-gcc'
 cfg['LD'] = 'arm-eabi-ld'
 cfg['AR'] = 'arm-eabi-ar'
 cfg['OBJCOPY'] = 'arm-eabi-objcopy'
-cfg['CCFLAGS'] = '-save-temps -save-temps=cwd -O3 -mcpu=cortex-a9 -fno-builtin-free -fno-builtin-printf -fno-builtin-sprintf -fno-builtin-memset'
+cfg['CCFLAGS'] = '-save-temps -save-temps=cwd -O3 -mcpu=cortex-a9 -fno-builtin-free -fno-builtin-printf -fno-builtin-sprintf -fno-builtin-memset -fno-builtin-memcpy -fno-builtin-malloc'
 cfg['hdrpaths'] = ['../../', '../', './corelib/']
 cfg['dirofboards'] = './boards'
 cfg['dirofmodules'] = './modules'

@@ -255,6 +255,7 @@ def process(file):
 		if toks[x] == '{':
 			# walk backwards
 			y = x
+			call = None
 			while y > -1:
 				if toks[y] == '(':
 					call, z = readthese(toks[y - 1], 0, [], [isvalidfuncname], True)
@@ -274,43 +275,44 @@ def process(file):
 					out['imps'][call] = info
 					break
 				y = y - 1
-			# walk through nested { } characters
-			_call = call		# hehe bad fix
-			nested = 1
-			x = x + 1
-			sub, x = grabnested(toks, x)
-			# run through sub looking for calls
-			y = 0
-			print('@@@@%s' % _call)
-			out['imps'][_call]['branch'] = 0
-			out['imps'][_call]['ops'] = 0
-			out['calls-per-function'][_call] = []
-			while y < len(sub):
-				# count branch type instructions
-				if sub[y] in ['if', 'for', 'while', 'case']:
-					out['imps'][_call]['branch'] = out['imps'][_call]['branch'] + 1
-				# count major operations
-				if sub[y] in ['+', '-', '*', '/', '%', '=', '~', '^', '&', '[', '>', '<']:
-					out['imps'][_call]['ops'] = out['imps'][_call]['ops'] + 1
-				# read this call
-				if sub[y] == '(':
-					call, z = readthese(sub[y - 1], 0, [], [isvalidfuncname], True)
-					if len(call) > 0 and call not in ['for', 'while', 'if', 'switch', 'asm']:
-						# track/count calls from this module (not per function)
-						if call in out['calls']:
-							out['calls'][call] = out['calls'][call] + 1
+			if call is not None:
+				# walk through nested { } characters
+				_call = call		# hehe bad fix
+				nested = 1
+				x = x + 1
+				sub, x = grabnested(toks, x)
+				# run through sub looking for calls
+				y = 0
+				print('@@@@%s' % _call)
+				out['imps'][_call]['branch'] = 0
+				out['imps'][_call]['ops'] = 0
+				out['calls-per-function'][_call] = []
+				while y < len(sub):
+					# count branch type instructions
+					if sub[y] in ['if', 'for', 'while', 'case']:
+						out['imps'][_call]['branch'] = out['imps'][_call]['branch'] + 1
+					# count major operations
+					if sub[y] in ['+', '-', '*', '/', '%', '=', '~', '^', '&', '[', '>', '<']:
+						out['imps'][_call]['ops'] = out['imps'][_call]['ops'] + 1
+					# read this call
+					if sub[y] == '(':
+						call, z = readthese(sub[y - 1], 0, [], [isvalidfuncname], True)
+						if len(call) > 0 and call not in ['for', 'while', 'if', 'switch', 'asm']:
+							# track/count calls from this module (not per function)
+							if call in out['calls']:
+								out['calls'][call] = out['calls'][call] + 1
+							else:
+								out['calls'][call] = 1
+							# track calls per function
+							out['calls-per-function'][_call].append(call)
 						else:
-							out['calls'][call] = 1
-						# track calls per function
-						out['calls-per-function'][_call].append(call)
-					else:
-						if call == 'for':
-							forcnt = forcnt + 1
-						if call == 'while':
-							whilecnt = whilecnt + 1
-						if call == 'if':
-							ifcnt = ifcnt + 1
-				y = y + 1
+							if call == 'for':
+								forcnt = forcnt + 1
+							if call == 'while':
+								whilecnt = whilecnt + 1
+							if call == 'if':
+								ifcnt = ifcnt + 1
+					y = y + 1
 			# okay outside body again
 			
 		x = x + 1
@@ -406,8 +408,8 @@ def gen(cfg, dir):
 					fcg[imp][cff] = {}
 					fcg[cff] = fcg[imp][cff]
 	
-	pprint.pprint(fcg)
-	exit()
+	#pprint.pprint(fcg)
+	#exit()
 	
 	for m in meta:
 		fmeta = meta[m]

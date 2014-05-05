@@ -53,6 +53,9 @@ typedef struct _ERH {
 	- object is specified with processID:signalID
 */
 
+#define IPC_PROTO_RB		0x100
+#define IPC_PROTO_ER		0x200
+
 int rb_write_nbio(RBM *rbm, void *p, uint32 sz);
 int rb_read_nbio(RBM *rbm, void *p, uint32 *sz, uint32 *advance);
 int rb_read_bio(RBM *rbm, void *p, uint32 *sz, uint32 *advance, uint32 timeout);
@@ -61,4 +64,5 @@ int er_init(ERH * erh, void *data, uint32 tsz, uint32 esz, KATOMIC_LOCKSPIN8NR l
 int er_ready(ERH *erh, void *data, uint32 tsz, uint32 esz, KATOMIC_LOCKSPIN8NR lockfp);
 int er_write_nbio(ERH *erh, void *p, uint32 sz);
 int er_read_nbio(ERH *erh, void *p, uint32 *sz);
+int er_peek_nbio(ERH *erh, void *p, uint32 *sz, uint8 **mndx);
 #endif
