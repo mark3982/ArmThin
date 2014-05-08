@@ -96,14 +96,12 @@ void *k_heapBMAllocBound(KHEAPBM *heap, uint32 size, uint32 bound) {
 	uint8				nid;
 	uint32				max;
 	
-	printf("k_heapBMAllocBound\n");
-	
 	KCCENTER(&heap->lock);
 	
 	bound = ~(~0 << bound);
 	/* iterate blocks */
 	for (b = heap->fblock; b; b = b->next) {
-		/* check if block has enough room */\
+		/* check if block has enough room */
 		if (b->size - (b->used * b->bsize) >= size) {
 			bcnt = b->size / b->bsize;		
 			bneed = (size / b->bsize) * b->bsize < size ? size / b->bsize + 1 : size / b->bsize;

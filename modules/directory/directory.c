@@ -2,9 +2,32 @@
 #include <corelib/core.h>
 #include <corelib/rb.h>
 #include <corelib/linkhelper.h>
+#include <corelib/vmessage.h>
+
+VMESSAGES			vmsgs;
 
 int main_pktarrived(void *arg, CORELIB_LINK *link) {
+	VMESSAGE			*msg;
+	void				*buf;
+	uint32				sz;
+	
+	buf = malloc(link->rxesz);
+	
 	printf("[directory] packet arrived link:%x\n", link);
+	
+	sz = link->rxesz;
+	if (lh_read_nbio(link, buf, &sz)) {
+		/* let us see if it is a v-message */
+		if (vmsg_checkread(&vmsgs, buf, link->rxesz, &msg)) {
+			/* we have a v-message */
+			
+			/* we are done processing message (free resources) */
+			vmsg_discard(&vmsgs, msg);
+		}
+	}
+	
+	free(buf);
+	
 	return 1;
 }
 
@@ -29,6 +52,9 @@ int main_linkestablished(void *arg, CORELIB_LINK *link) {
 int main() {
 	uint32			pkt[32];
 	uint32			sz;
+	
+	/* initialize v-messages structure */
+	memset(&vmsgs, 0, sizeof(vmsgs));
 	
 	/* register as directory service */
 	sz = sizeof(pkt);

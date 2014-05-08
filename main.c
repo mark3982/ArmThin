@@ -820,6 +820,15 @@ void k_exphandler(uint32 lr, uint32 type) {
 			case KSWI_GETPAGESIZE:
 				stk[-14] = KVIRPAGESIZE;
 				break;
+			case KSWI_REQPHYMEMMAP:
+				r0 = stk[-14];
+				if (!kvmm2_findregion(&cs->cproc->vmm, 1, KMEMSIZE, 0, 0, &r1)) {
+					stk[-14] = 0;
+					break;
+				}
+				kvmm2_mapsingle(&cs->cproc->vmm, r1, r0, TLB_C_AP_FULLACCESS);
+				stk[-14] = 1;
+				break;
 			case KSWI_VALLOC:
 				/* allocate range of pages and store result in R0 */
 				r0 = stk[-14];

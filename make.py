@@ -38,11 +38,10 @@ def executecmd(cwd, args, cmdshow=True):
 	if len(se) > 0:
 		return False
 	return True
-
+	
 '''
 	GENERIC DIRECTORY COMPILATION WITH GCC COMPATIBLE COMPILER
 '''
-
 def compileDirectory(cfg, dir):
 	nodes = os.listdir(dir)
 	
@@ -76,13 +75,17 @@ def compileDirectory(cfg, dir):
 def makeModule(cfg, dir, out):
 	print((bcolors.HEADER + bcolors.OKGREEN + 'module-make [%s]' + bcolors.ENDC) % (out))
 		
+	# i want some things enabled for modules but not the kernel
+	old = cfg['CCFLAGS']
+	cfg['CCFLAGS'] = '-Wimplicit-function-declaration %s' % cfg['CCFLAGS']
 	res, objs = compileDirectory(cfg, dir)
+	cfg['CCFLAGS'] = old
 		
 	objs = ' '.join(objs)
 	# the -N switch has to prevent the file_offset in the elf32 from being
 	# equal to the VMA address which was bloating the modules way too much
 	# now they should be aligned to a 4K boundary or something similar
-	if executecmd(dir, '%s -T ../../module.link -L%s -N -o ../%s.mod ../../corelib/linkhelper.o ../../corelib/linklist.o ../../corelib/kheap_bm.o ../../corelib/atomicsh.o ../../corelib/core.o ../../corelib/rb.o %s -lgcc' % (cfg['LD'], cfg['LIBGCCPATH'], out, objs), cmdshow=cfg['cmdshow']) is False:
+	if executecmd(dir, '%s -T ../../module.link -L%s -N -o ../%s.mod ../../corelib/vmessage.o ../../corelib/linkhelper.o ../../corelib/linklist.o ../../corelib/kheap_bm.o ../../corelib/atomicsh.o ../../corelib/core.o ../../corelib/rb.o %s -lgcc' % (cfg['LD'], cfg['LIBGCCPATH'], out, objs), cmdshow=cfg['cmdshow']) is False:
 		return False
 	#if executecmd(dir, '%s -S ../%s.mod ../%s.mod' % (cfg['OBJCOPY'], out, out), cmdshow=cfg['cmdshow']) is False:
 	#	return False
@@ -136,6 +139,23 @@ def makeKernel(cfg, dir, out, bobjs):
 	if executecmd(dir, '%s -j .text -O binary %s %s' % (cfg['OBJCOPY'], tmp, out), cmdshow=cfg['cmdshow']) is False:
 		return False
 	return True
+
+def clean(dir):
+	print(bcolors.HEADER + bcolors.OKGREEN + ('CLEAN [%s]' % dir) + bcolors.ENDC)
+	nodes = os.listdir(dir)
+	for node in nodes:
+		if node[0] == '.':
+			continue
+		if os.path.isdir('%s/%s' % (dir, node)):
+			clean('%s/%s' % (dir, node))
+		if node.find('.') < 1:
+			continue
+		ext = node[node.find('.') + 1:]
+		base = node[0:node.find('.')]
+		if ext == 'o':
+			print('    [DELETED] %s' % (node))
+			os.remove('%s/%s' % (dir, node))
+	
 '''
 	This is the main method to make the system.
 '''
@@ -209,7 +229,8 @@ cfg['CC'] = 'arm-eabi-gcc'
 cfg['LD'] = 'arm-eabi-ld'
 cfg['AR'] = 'arm-eabi-ar'
 cfg['OBJCOPY'] = 'arm-eabi-objcopy'
-cfg['CCFLAGS'] = '-save-temps -save-temps=cwd -O3 -mcpu=cortex-a9 -fno-builtin-free -fno-builtin-printf -fno-builtin-sprintf -fno-builtin-memset -fno-builtin-memcpy -fno-builtin-malloc'
+# -save-temps -save-temps=cwd
+cfg['CCFLAGS'] = '-O3 -mcpu=cortex-a9 -fno-builtin-free -fno-builtin-printf -fno-builtin-sprintf -fno-builtin-memset -fno-builtin-memcpy -fno-builtin-malloc'
 cfg['hdrpaths'] = ['../../', '../', './corelib/']
 cfg['dirofboards'] = './boards'
 cfg['dirofmodules'] = './modules'
@@ -245,6 +266,9 @@ else:
 				continue
 			info = readfile('%s/%s/info' % (cfg['dirofboards'], node))
 			print((bcolors.HEADER + bcolors.OKGREEN + '%-20s%s' + bcolors.ENDC) % (node, info))
+		exit()
+	if farg == 'clean':
+		clean('./')
 		exit()
 	if farg == 'make':
 		if len(sys.argv) < 3:

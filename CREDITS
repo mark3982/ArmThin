@@ -13,10 +13,14 @@ from osdev.org
 	Brendan, Combuster
 	
 special thanks:
+	klang		-	bitmap console font header file (BIG HELP)
+					<also must remember he can help with TrueType>
 	geist		-	helping with:
 					performance and general help
 					cache and coherency
 					VMSAv6, VMSAv7, VMSAv8
 	mrvn		-	helping with IPC and servicing HW interrupts
+					idea for givetime(process, thread) to give the
+					remaining timeslice to target process:thread
 	reavengray	-	helping with keeping me grounded in 
 				realiable/proven designs

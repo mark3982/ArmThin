@@ -24,6 +24,9 @@ typedef struct _CORELIB_LINK {
 	uintptr			txsize;
 	uintptr			rxsize;
 	
+	uint32			txesz;			/* static message size TX */
+	uint32			rxesz;			/* static message size RX */
+	
 	LH_WRITE_NBIO	wnbio;			/* call for specific protocol */
 	LH_READ_NBIO	rnbio;			/* call for specific protocol */
 	LH_PEEK_NBIO	pnbio;			/* call for specific protocol */

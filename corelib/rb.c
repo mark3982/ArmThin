@@ -22,7 +22,6 @@ int er_ready(ERH *erh, void *data, uint32 tsz, uint32 esz, KATOMIC_LOCKSPIN8NR l
 	erh->ecnt = ecnt;
 	erh->mcnt = mcnt;
 	erh->lpos = 0;
-	
 	return 1;
 }
 

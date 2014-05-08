@@ -24,8 +24,15 @@
 	@sdescription:		Generalized IPC link write operation.
 */
 int lh_write_nbio(CORELIB_LINK *link, void *p, uint32 sz) {
+	int		ret;
+
 	if (link->wnbio) {
-		return link->wnbio(link->tx, p, sz);
+		ret = link->wnbio(link->tx, p, sz);
+		if (ret) {
+			/* signal and wake up remote thread */
+			signal(link->process, link->thread, link->rsignal);
+			wakeup(link->process, link->thread);
+		}
 	}
 	
 	return -1;
@@ -105,7 +112,7 @@ void linkhelper_setoptarg(void *arg) {
 */
 int linkhelper_init() {
 	gldlc = 0;
-	gldlctime = getTicksPerSecond();
+	gldlctime = getTicksPerSecond() * 10;
 	
 	memset(&glh, 0, sizeof(glh));
 	
@@ -254,6 +261,10 @@ int linkhelper_tick() {
 			
 				glh.array[link->lsignal] = link;
 	
+				/* not entry based (variable) */
+				link->rxesz = 0;
+				link->txesz = 0;
+	
 				switch (pkt[7]) {
 					case IPC_PROTO_RB:
 						link->wnbio = (LH_WRITE_NBIO)rb_write_nbio;
@@ -261,26 +272,32 @@ int linkhelper_tick() {
 						link->pnbio = 0;					/* not supported */
 						link->rx = malloc(sizeof(ERH));
 						link->tx = malloc(sizeof(ERH));
+						break;
+					case IPC_PROTO_ER:
+						/* entry based non-variable */
+						link->rx = malloc(sizeof(ERH));
+						link->tx = malloc(sizeof(ERH));
+						link->rxesz = pkt[11];
+						link->txesz = pkt[12];
+						link->wnbio = (LH_WRITE_NBIO)er_write_nbio;
+						link->rnbio = (LH_READ_NBIO)er_read_nbio;
+						link->pnbio = (LH_PEEK_NBIO)er_peek_nbio;
 						/*
 							setup; passing size and entry size and also
 							locking function for transmit buffer for multiple
 							writers; lock can be optional (or it will fail if
 							required)
 						*/
-						er_ready(link->rx, (void*)link->addr, link->rxsize,  pkt[12], 0);
-						er_ready(link->tx, (void*)(link->addr + link->rxsize), link->txsize, pkt[11], &katomic_lockspin_yield8nr);
-						break;
-					case IPC_PROTO_ER:
-						link->wnbio = (LH_WRITE_NBIO)er_write_nbio;
-						link->rnbio = (LH_READ_NBIO)er_read_nbio;
-						link->pnbio = (LH_PEEK_NBIO)er_peek_nbio;
+						er_ready(link->rx, (void*)link->addr, link->rxsize,  link->rxesz, 0);
+						er_ready(link->tx, (void*)(link->addr + link->rxsize), link->txsize, link->txesz, &katomic_lockspin_yield8nr);
 						break;
 					default:
-						/* unsupported protocol type */
+						/* unsupported protocol type (link has to be configured manually) */
 						link->wnbio = 0;
 						link->rnbio = 0;
 						link->pnbio = 0;
 						printf("[corelib] [linkhelper] UNSUPPORTED PROTOCOL:%x\n", pkt[7]);
+						/* TODO: add better handling (such as user callback) */
 						break;
 				}
 				

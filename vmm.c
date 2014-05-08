@@ -13,6 +13,9 @@
 #define VMMKCCEXIT
 #endif
 
+/*
+	@sdescription:		Initializes the stack block.
+*/
 int kstack_initblock(KSTACKBLOCK *b) {
 	uint32			x;
 	/* set max and top and prev */
@@ -26,6 +29,10 @@ int kstack_initblock(KSTACKBLOCK *b) {
 	
 	return 1;
 }
+
+/*
+	@sdescription:		Check if stack is empty.
+*/
 int kstack_empty(KSTACK *stack) {
 	if (!stack->cur->top && !stack->cur->prev) {
 		return 1;
@@ -34,6 +41,9 @@ int kstack_empty(KSTACK *stack) {
 	return 0;
 }
 
+/*
+	@sdescription:		Pops item off stack.
+*/
 int kstack_pop(KSTACK *stack, uint32 *v) {
 	if (!stack->cur->top && !stack->cur->prev) {
 		return 0;
@@ -46,6 +56,9 @@ int kstack_pop(KSTACK *stack, uint32 *v) {
 	*v = ((uint32*)&stack->cur[1])[--stack->cur->top];
 }
 
+/*
+	@sdescription:		Pushes item onto stack.
+*/
 int kstack_push(KSTACK *stack, uint32 v) {
 	KSTACKBLOCK				*b, *_b;
 	KSTATE					*ks;
@@ -79,9 +92,7 @@ int kstack_push(KSTACK *stack, uint32 v) {
 }
 
 /*
-	This function does not support being called when paging is enabled. It however will
-	gracefully fail if unable to initialize. It may initialize with paging on but it is
-	not reliable.
+	@sdescription:		Initializes the stack.
 */
 int kstack_init(KSTACK *stack) {
 	KSTACKBLOCK				*b;
@@ -89,7 +100,6 @@ int kstack_init(KSTACK *stack) {
 	uint32					x;
 	
 	ks = GETKS();
-	/* paging is not likely up so we have to identity map */
 	b = (KSTACKBLOCK*)k_heapBMAllocBound(&ks->hchk, K1KPAGESTACKBSZ, 0);
 	if (!b) {
 		PANIC("heap-alloc-failed");
@@ -105,10 +115,16 @@ int kstack_init(KSTACK *stack) {
 	return 1;
 }
 
+/*
+	@sdescription:		If partial page like 0x345 it rounds it up to 0x1000 or 0x1293 to 0x2000.
+*/
 uintptr kvmm2_rndup(uintptr sz) {
 	return (sz / 4096) * 4096 != sz ? (sz / 4096) + 1 : sz / 4096;
 }
 
+/*
+	@sdescription:		Uses reverse map to increment references to physical page.
+*/
 uint32 kvmm2_revinc(uintptr v) {
 	uint32		val;	
 	KSTATE		*ks;
@@ -122,6 +138,9 @@ uint32 kvmm2_revinc(uintptr v) {
 	return val;
 }
 
+/*
+	@sdescription:		Uses reverse map to decrement references to physical page.
+*/
 uint32 kvmm2_revdec(uintptr v) {
 	uint32		val;
 	KSTATE		*ks;
@@ -140,7 +159,9 @@ uint32 kvmm2_revdec(uintptr v) {
 	return val;
 }
 
-
+/*
+	@sdescription:		Sets one of two parts of reverse map for specified physical address.
+*/
 int kvmm2_revset(uintptr p, uint32 v, uint8 opt) {
 	KSTATE			*ks;
 	uint32			*t;
@@ -170,6 +191,9 @@ int kvmm2_revset(uintptr p, uint32 v, uint8 opt) {
 	return 1;
 }
 
+/*
+	@sdescription:		Gets one of two parts for physical address in reverse map.
+*/
 uintptr kvmm2_revget(uintptr p, uint8 opt) {
 	uint32			*t;
 	KSTATE			*ks;
@@ -199,6 +223,11 @@ uintptr kvmm2_revget(uintptr p, uint8 opt) {
 	return res;
 }
 
+/*
+	TODO: Check if this might cause problems.. kernel cant hold pages above KMEMSIZE.
+	
+	@sdescription:		Gets address of page not yet mapped. Starts high.
+*/
 int kvmm2_getu4k(KVMMTABLE *vmm, uintptr *o, uint32 flags) {
 	int32			x, y;
 	uint32			*t, *st;
@@ -235,7 +264,9 @@ int kvmm2_getu4k(KVMMTABLE *vmm, uintptr *o, uint32 flags) {
 	return 0;
 }
 
-/* get unused coarse table slot */
+/*
+	@sdescription:		Gets unused coarse table slot.
+*/
 uint32 kvmm2_getucts(KVMMTABLE *vmm, uint32 *slot) {
 	uint32			x;
 	uint32			*t;
@@ -258,7 +289,7 @@ uint32 kvmm2_getucts(KVMMTABLE *vmm, uint32 *slot) {
 }
 
 /*
-	NOT PROTECTED BY A PER-CPU LOCK
+	@sdescription:		Gets unused 1K table.
 */
 static int kvmm2_get1Ktable(uintptr *o, uint32 flags) {
 	KSTATE			*ks;
@@ -368,6 +399,9 @@ static int kvmm2_get1Ktable(uintptr *o, uint32 flags) {
 	return 1; 
 }
 
+/*
+	@sdescription: 	Get physical address of virtual address.
+*/
 int kvmm2_getphy(KVMMTABLE *vmm, uintptr v, uintptr *o) {
 	uint32			*t;
 	
@@ -400,6 +434,9 @@ int kvmm2_getphy(KVMMTABLE *vmm, uintptr v, uintptr *o) {
 	return 1;
 }
 
+/*
+	@sdescription:		Finds a region of specified size between boundaries.
+*/
 int kvmm2_findregion(KVMMTABLE *vmm, uintptr tc, uintptr low, uintptr high, uint32 flags, uintptr *out) {
 	uint32			*t, *st;
 	KSTATE			*ks;
@@ -460,7 +497,9 @@ int kvmm2_findregion(KVMMTABLE *vmm, uintptr tc, uintptr low, uintptr high, uint
 	return 0;
 }
 
-
+/*
+	@sdescription:			Finds unused region and allocates fresh pages for it.
+*/
 int kvmm2_allocregion(KVMMTABLE *vmm, uintptr pcnt, uintptr low, uintptr high, uint32 flags, uintptr *out) {
 	uint32			x;
 	uintptr			p;
@@ -523,6 +562,9 @@ int kvmm2_allocregion(KVMMTABLE *vmm, uintptr pcnt, uintptr low, uintptr high, u
 	return 1;
 }
 
+/*
+	@sdescription:		Allocate fresh memory region at specified address, or fail.
+*/
 int kvmm2_allocregionat(KVMMTABLE *vmm, uintptr pcnt, uintptr start, uint32 flags) {
 	uintptr				tmp;
 	int					res;
@@ -533,6 +575,9 @@ int kvmm2_allocregionat(KVMMTABLE *vmm, uintptr pcnt, uintptr start, uint32 flag
 	return res;
 }
 
+/*
+	@sdescription:		Map single page virtual to physical.
+*/
 int kvmm2_mapsingle(KVMMTABLE *vmm, uintptr v, uintptr p, uint32 flags) {
 	uint32			*t;
 	uint32			*st;
@@ -658,6 +703,9 @@ int kvmm2_walkentries(KVMMTABLE *vmm, KVMM2_WALKCB cb) {
 	return c;
 }
 
+/*
+	@sdescription:		Unmap (zero) out mapping for specified virtual address.
+*/
 int kvmm2_unmap(KVMMTABLE *vmm, uintptr v, uint8 free) {
 	uintptr				phy;
 	uint32 volatile		*t, *st;
@@ -694,6 +742,9 @@ int kvmm2_unmap(KVMMTABLE *vmm, uintptr v, uint8 free) {
 	return 1;
 }
 
+/*
+	@sdescription:		Map multiple pages in sequence.
+*/
 int kvmm2_mapmulti(KVMMTABLE *vmm, uintptr v, uintptr p, uintptr c, uint32 flags) {
 	uintptr			x;
 	int				ret;
@@ -734,6 +785,9 @@ void ptwalker(uint32 *t) {
 	}
 }
 
+/*
+	@sdescription:		Initialize new VMM table (virtual memory space).
+*/
 int kvmm2_init(KVMMTABLE *t) {
 	uint32			x;
 	KSTATE			*ks;
@@ -778,6 +832,9 @@ int kvmm2_init(KVMMTABLE *t) {
 	return 1;
 }
 
+/*
+	@sdescription:		Initialize the reverse table.
+*/
 int kvmm2_init_revtable() {
 	uint32		x;
 	KSTATE		*ks;
@@ -797,6 +854,9 @@ int kvmm2_init_revtable() {
 	return 1;
 }
 
+/*
+	@sdescription:		Do main initialization for VMM sub-system.
+*/
 int kvmm2_baseinit() {
 	KSTATE			*ks;
 	uint32			x;
