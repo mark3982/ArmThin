@@ -5,12 +5,15 @@
 */
 void ll_add(void **p, void *i) {
 	LL		*_i;
-	
+	LL		*croot;
+		
 	_i = (LL*)i;
 	
 	_i->next = *p;
-	if (*p) {
-		_i->prev = ((LL*)(*p))->prev;
+	if (p && *p) {
+		croot = ((LL*)(*p));
+		_i->prev = croot->prev;
+		croot->prev = _i;
 	} else {
 		_i->prev = 0;
 	}

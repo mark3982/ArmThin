@@ -54,7 +54,7 @@ int main() {
 	uint32			sz;
 	
 	/* initialize v-messages structure */
-	memset(&vmsgs, 0, sizeof(vmsgs));
+	vmsg_init(&vmsgs);
 	
 	/* register as directory service */
 	sz = sizeof(pkt);
@@ -66,18 +66,18 @@ int main() {
 	er_write_nbio(&__corelib_tx, &pkt[0], 5 * 4);
 	notifykserver();
 	
-	linkhelper_init();
+	lh_init();
 	
-	linkhelper_setoptarg(0);
-	linkhelper_setpktarrived(&main_pktarrived);
-	linkhelper_setlinkreq(&main_linkreq);
-	linkhelper_setlinkdropped(&main_linkdropped);
-	linkhelper_setlinkestablished(&main_linkestablished);
-	linkhelper_setkmsg(&main_kmsg);
+	lh_setoptarg(0);
+	lh_setpktarrived(&main_pktarrived);
+	lh_setlinkreq(&main_linkreq);
+	lh_setlinkdropped(&main_linkdropped);
+	lh_setlinkestablished(&main_linkestablished);
+	lh_setkmsg(&main_kmsg);
 	
 	while (1) {
-		linkhelper_sleep(0);
-		linkhelper_tick();
+		lh_sleep(0);
+		lh_tick();
 	}
 	
 	return 1;

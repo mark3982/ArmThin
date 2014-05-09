@@ -74,15 +74,15 @@ int lh_read_nbio(CORELIB_LINK *link, void *p, uint32 *sz);
 int lh_peek_nbio(CORELIB_LINK *link, void *p, uint32 *sz, uint8 **mndx);
 
 /* callback setters */
-void linkhelper_setkmsg(LH_KMSG h);
-void linkhelper_setpktarrived(LH_PKTARRIVED h);
-void linkhelper_setlinkreq(LH_LINKREQ h);
-void linkhelper_setlinkdropped(LH_LINKDROPPED h);
-void linkhelper_setlinkestablished(LH_LINKESTABLISHED h);
-void linkhelper_setoptarg(void *arg);
+void lh_setkmsg(LH_KMSG h);
+void lh_setpktarrived(LH_PKTARRIVED h);
+void lh_setlinkreq(LH_LINKREQ h);
+void lh_setlinkdropped(LH_LINKDROPPED h);
+void lh_setlinkestablished(LH_LINKESTABLISHED h);
+void lh_setoptarg(void *arg);
 
 /* core functions */
-int linkhelper_init();
-int linkhelper_sleep(uint32 timeout);
-int linkhelper_tick();
+int lh_init();
+int lh_sleep(uint32 timeout);
+int lh_tick();
 #endif

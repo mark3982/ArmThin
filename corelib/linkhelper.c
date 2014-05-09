@@ -68,49 +68,49 @@ static uint32						gldlc;
 /*
 	@sdescription:		Called when a kernel message arrives that is NOT handled.
 */
-void linkhelper_setkmsg(LH_KMSG h) {
+void lh_setkmsg(LH_KMSG h) {
 	glh.handler_kmsg = h;
 }
 
 /*
 	@sdescription:		Called when a packet arrives.
 */
-void linkhelper_setpktarrived(LH_PKTARRIVED h) {
+void lh_setpktarrived(LH_PKTARRIVED h) {
 	glh.handler_pktarrived = h;
 }
 
 /*
 	@sdescription:		Called when IPC link is requested.
 */
-void linkhelper_setlinkreq(LH_LINKREQ h) {
+void lh_setlinkreq(LH_LINKREQ h) {
 	glh.handler_linkreq = h;
 }
 
 /*
 	@sdescription:		Called when an IPC link is dropped.
 */
-void linkhelper_setlinkdropped(LH_LINKDROPPED h) {
+void lh_setlinkdropped(LH_LINKDROPPED h) {
 	glh.handler_linkdropped = h;
 }
 
 /*
 	@sdescription:		Called when an IPC link is established.
 */
-void linkhelper_setlinkestablished(LH_LINKESTABLISHED h) {
+void lh_setlinkestablished(LH_LINKESTABLISHED h) {
 	glh.handler_linkestablished = h;
 }
 
 /*
 	@sdescription:		Sets optional argument for the callbacks.
 */
-void linkhelper_setoptarg(void *arg) {
+void lh_setoptarg(void *arg) {
 	glh.handler_arg = arg;
 }
 
 /*
 	@sdescription:		Initializes the link helper system.
 */
-int linkhelper_init() {
+int lh_init() {
 	gldlc = 0;
 	gldlctime = getTicksPerSecond() * 10;
 	
@@ -126,7 +126,7 @@ int linkhelper_init() {
 /*
 	@sdescription:		If application is done, this will sleep at most the timeout specified unless its zero.
 */
-int linkhelper_sleep(uint32 timeout) {
+int lh_sleep(uint32 timeout) {
 	uint32		_timeout;
 	uint32		osticks;
 	
@@ -145,7 +145,7 @@ int linkhelper_sleep(uint32 timeout) {
 /*
 	@sdescription:		Performs various operations needed to maintain state.
 */	
-int linkhelper_tick() {
+int lh_tick() {
 	uint32				pkt[32];
 	uint32				sz;
 	uintptr				tarproc;

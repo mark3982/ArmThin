@@ -1,8 +1,13 @@
 #include <corelib/core.h>
 #include <corelib/rb.h>
+#include <corelib/linkhelper.h>
+#include <corelib/vmessage.h>
 #include <main.h>
 
 static uint32		threadstarted;
+
+VMESSAGES		vmsgs;
+
 
 void msghandler() {
 	for (;;) {
@@ -91,6 +96,105 @@ int er_waworr(ERH *tx, ERH *rx, void *out, uint32 sz, uint32 rid32ndx, uint32 ri
 	return 0;
 }
 
+int main_pktarrived(void *arg, CORELIB_LINK *link) {
+	VMESSAGE			*msg;
+	void				*buf;
+	uint32				sz;
+	
+	buf = malloc(link->rxesz);
+	
+	printf("[directory] packet arrived link:%x\n", link);
+	
+	sz = link->rxesz;
+	if (lh_read_nbio(link, buf, &sz)) {
+		/* let us see if it is a v-message */
+		if (vmsg_checkread(&vmsgs, buf, link->rxesz, &msg)) {
+			/* we have a v-message */
+			
+			/* we are done processing message (free resources) */
+			vmsg_discard(&vmsgs, msg);
+		}
+	}
+	
+	free(buf);
+	
+	return 1;
+}
+
+/*
+	@sdescription:			Requests a link to a remote process and thread through the kernel. It will
+							not wait for the reply, but will rather catch it during the tick.
+	@param:rid:				request id
+	@param:rprocess:		remote process
+	@param:rthread:			remote thread
+	@param:proto:			protocol
+	@param:lsignal:			local signal to be used by remote
+	@param:addr:			address of memory chunk to be used
+	@param:pcnt:			page count of memory chunk
+	@param:rxsz:			size of RX		(remote RX)
+	@param:txsz:			size of TX		(remote TX)
+	@param:rxesz:			(if entry based) entry size
+	@param:txesz:			(if entry based) entry size
+*/
+int lh_establishlink(uint32 rprocess, uint32 rthread, uint32 proto, uint32 rxsz, uint32 txsz, uint32 rxesz, uint32 txesz) {
+	uint32		pkt[12];
+	uint32		rid;
+	uint32		lsignal;
+	uint32		addr;
+	
+	rid = lh_getrid();
+	lsignal = lg_getlsignal();
+	
+	addr = lh_getmemory(rxsz + txsz);
+	pcnt = PAGERNDUP((rxsz + txsz) / pagesize);
+				   
+	pkt[0] = KMSG_REQSHARED;
+	pkt[1] = rid;					/* request id */
+	pkt[2] = addr;					/* address of memory */
+	pkt[3] = pcnt;					/* page count */
+	pkt[4] = rprocess;				/* target process */
+	pkt[5] = rthread; 				/* target thread */
+	pkt[6] = lsignal;				/* signal we want used */
+	pkt[7] = proto;					/* protocol to be used */
+	pkt[8] = rxsz;					/* size of rx */
+	pkt[9] = txsz;					/* size of tx */
+	pkt[10] = rxesz;				/* size of rx entry */	
+	pkt[11] = txesz;				/* size of tx entry */
+
+	return er_write_nbio(&__corelib_tx, &pkt[0], sizeof(pkt));
+	
+	//er_waworr(&__corelib_tx, &__corelib_rx, &pkt[0], 10 * 4, 1, pkt[1], 0);
+	//printf("[lh] got response from kserver type:%x\n", pkt[0]);
+	
+	/* listen for the acceptance/rejection message */
+	//if (!er_worr(&__corelib_rx, &pkt[0], sizeof(pkt), 1, 0x12344321, 0)) {
+	//	printf("[lh] timeout waiting for reply! HALTED\n");
+	//	return 0;
+	//}
+	return 1;
+}
+
+
+/* ------------------------------------------------------------------ */
+
+int main_kmsg(void *arg, uint32 *pkt, uint32 sz) {
+}
+
+int main_linkreq(void *arg, uintptr process, uintptr thread, uint32 proto) {
+	printf("[directory] link request process:%x thread:%x proto:%x\n", process, thread, proto);
+	return 1;
+}
+
+int main_linkdropped(void *arg, CORELIB_LINK *link) {
+	printf("[directory] link dropped link:%x\n", link);
+	return 1;
+}
+
+int main_linkestablished(void *arg, CORELIB_LINK *link) {
+	printf("[directory] link established link:%x\n", link);
+	return 1;
+}
+
 int main() {
 	int				x;
 	int				y;
@@ -105,6 +209,8 @@ int main() {
 	uintptr			dirsignal;
 	
 	smmio = (unsigned int*)0xa0000000;
+	
+	vmsg_init(&vmsgs);
 	
 	smmio[0] = '+';
 	
@@ -138,7 +244,6 @@ int main() {
 	}
 	
 	printf("[testuelf] woke up\n");
-	
 	printf("[testuelf] thread start detected\n");
 	
 	/* wait for reply for service enum */
@@ -164,36 +269,37 @@ int main() {
 		sleep(5);
 	}
 	
-	/* we have the directory service process:thread ID now try to open a connection */
-	pkt[0] = KMSG_REQSHARED;
-	pkt[1] = 0x12344321;			/* request id */
-	pkt[2] = addr;					/* address of memory */
-	pkt[3] = 1;						/* page count */
-	pkt[4] = dirproc;				/* target process */
-	pkt[5] = dirthread; 			/* target thread */
-	pkt[6] = 1;						/* signal we want used */
-	pkt[7] = KPROTO_ENTRYRING;		/* protocol to be used */
-	pkt[8] = 4096 >> 1;				/* size of rx */
-	pkt[9] = 4096 >> 1;				/* size of tx */
-	pkt[10] = 16 * 4;				/* size of rx entry */	
-	pkt[11] = 16 * 4;				/* size of tx entry */
-	/* send and wait for response from kserver */
-	er_waworr(&__corelib_tx, &__corelib_rx, &pkt[0], 10 * 4, 1, pkt[1], tps * 30);
-	printf("[testuelf] got response from kserver type:%x\n", pkt[0]);
-	
-	/* listen for the acceptance/rejection message */
-	if (!er_worr(&__corelib_rx, &pkt[0], sizeof(pkt), 1, 0x12344321, tps * 30)) {
-		printf("[testuelf] timeout waiting for reply! HALTED\n");
-		for (;;);
+	/* request link to remote directory service */
+	if (!lh_establishlink(dirproc, dirthread, KPROTO_ENTRYRING, 4096 >> 1, 4096 >> 1, 16 * 4, 16 * 4)) {
+		printf("[app] establish link failed\n");
+		return -1;
 	}
 	
-	dirsignal = pkt[7];
+	//dirsignal = pkt[7];
 	
 	/* write to shared memory to trigger response */
-	printf("writting to %x\n", pkt[2]);
-	((uint32*)pkt[2])[0] = 0xdeedbeef;
+	//printf("writting to %x\n", pkt[2]);
+	//((uint32*)pkt[2])[0] = 0xdeedbeef;
+	
+	
 	/* set signal for directory to notify it which IPC connection to read from */
-	signal(dirproc, dirthread, dirsignal);	
+	//signal(dirproc, dirthread, dirsignal);	
+
+	/* go into linkhelper mode */
+	lh_init();
+	
+	lh_setoptarg(0);
+	lh_setpktarrived(&main_pktarrived);
+	lh_setlinkreq(&main_linkreq);
+	lh_setlinkdropped(&main_linkdropped);
+	lh_setlinkestablished(&main_linkestablished);
+	lh_setkmsg(&main_kmsg);
+	
+	while (1) {
+		/* we can do anything we need to do in here and adjust lh_sleep */
+		lh_sleep(0);
+		lh_tick();
+	}
 	
 	for (;;);
 	return 0;
