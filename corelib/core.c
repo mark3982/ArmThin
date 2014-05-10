@@ -224,6 +224,15 @@ uint32 getosticks() {
 	asm("swi %[code]" : : [code]"i" (KSWI_GETOSTICKS));
 }
 
+void switchto(uintptr	proc, uintptr thread) {
+	asm volatile (
+			"push {r0, r1}\n"
+			"swi %[code]\n"
+			"pop {r0, r1}\n"
+			: : [code]"i" (KSWI_SWITCHTO)
+	);
+}
+
 void wakeup(uintptr	proc, uintptr thread) {
 	asm volatile (
 			"push {r0, r1}\n"

@@ -55,10 +55,10 @@ int er_write_nbio(ERH *erh, void *p, uint32 sz) {
 	
 	map = (uint8*)erh->er;
 	
-	if (!erh->lockfp) {
-		printf("[er] no lockfp!\n");
-		return -2;
-	}
+	//if (!erh->lockfp) {
+	//	printf("[er] no lockfp!\n");
+	//	return -2;
+	//}
 	
 	if (sz > erh->esz) {
 		printf("[er] sz:%x > erh->esz:%x\n", sz, erh->esz);
@@ -69,7 +69,10 @@ int er_write_nbio(ERH *erh, void *p, uint32 sz) {
 	for (x = 0; x < erh->ecnt; ++x) {
 		/* try to lock it */
 		//printf("[er] <write> checking map[%x]:%x\n", x, map[x]);
-		if (map[x] == 0 && erh->lockfp(&map[x], 1)) {
+		if (map[x] == 0) {
+			if (erh->lockfp && !erh->lockfp(&map[x], 1)) {
+				continue;
+			}
 			//printf("[er] wrote at %x\n", x);
 			/* got lock, now write data */
 			data = (uint8*)((uintptr)erh->er + x * erh->esz);
@@ -131,6 +134,11 @@ int er_read_nbio(ERH *erh, void *p, uint32 *sz) {
 	}
 	/* nothing has been read */
 	return 0;
+}
+
+int rb_ready(RBM *rbm, void *p, uint32 sz) {
+	rbm->rb = (RB*)p;
+	rbm->sz = sz;
 }
 
 int rb_write_nbio(RBM *rbm, void *p, uint32 sz) {

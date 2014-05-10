@@ -27,12 +27,7 @@ int lh_write_nbio(CORELIB_LINK *link, void *p, uint32 sz) {
 	int		ret;
 
 	if (link->wnbio) {
-		ret = link->wnbio(link->tx, p, sz);
-		if (ret) {
-			/* signal and wake up remote thread */
-			signal(link->process, link->thread, link->rsignal);
-			wakeup(link->process, link->thread);
-		}
+		return link->wnbio(link->tx, p, sz);
 	}
 	
 	return -1;
@@ -86,6 +81,10 @@ void lh_setlinkreq(LH_LINKREQ h) {
 	glh.handler_linkreq = h;
 }
 
+void lh_setlinkfailed(LH_LINKFAILED h) {
+	glh.handler_linkfailed = h;
+}
+
 /*
 	@sdescription:		Called when an IPC link is dropped.
 */
@@ -107,12 +106,18 @@ void lh_setoptarg(void *arg) {
 	glh.handler_arg = arg;
 }
 
+void lh_setdbgname(char *dbgname) {
+	glh.dbgname = dbgname;
+}
+
 /*
 	@sdescription:		Initializes the link helper system.
 */
 int lh_init() {
 	gldlc = 0;
 	gldlctime = getTicksPerSecond() * 10;
+	
+	glh.dbgname = "unknown";
 	
 	memset(&glh, 0, sizeof(glh));
 	
@@ -141,6 +146,44 @@ int lh_sleep(uint32 timeout) {
 	printf("[corelib] [linkhelper] sleep for %x\n", _timeout);
 	sleepticks(_timeout);
 }
+
+uint32 lh_getnewsignalid() {
+	uint32		x;
+	void		*tmp;
+	
+	printf("CCCC max:%x array:%x\n", glh.arraymax, glh.array);
+	for (x = 10; x < glh.arraymax; ++x) {
+		if (!glh.array[x]) {
+			break;
+		}
+	}
+	printf("AAAA x:%x\n", x);
+	if (x >= glh.arraymax) {
+		/*
+			The array is not big enough. We need to reallocate it, and
+			then also set 'x' to a free slot index.
+		
+			(1) save old pointer
+			(2) alloc array at double current size
+			(3) clear array to zeros
+			(4) copy old array on top
+			(5) set 'x' to next free slot
+			(6) increase arraymax by *2
+			(7) free old array
+		*/
+		tmp = glh.array;
+		glh.array = (CORELIB_LINK**)malloc(sizeof(CORELIB_LINK*) * glh.arraymax * 2);
+		memset(glh.array, 0, sizeof(CORELIB_LINK*) * glh.arraymax * 2);
+		memcpy(glh.array, tmp, sizeof(CORELIB_LINK*) * glh.arraymax);
+		x = glh.arraymax;
+		glh.arraymax = glh.arraymax * 2;
+		free(tmp);
+	}
+	
+	printf("[%s] [corelib] [lh_getnewsignalid=%x]\n", glh.dbgname, x);
+	
+	return x;
+}
 	
 /*
 	@sdescription:		Performs various operations needed to maintain state.
@@ -157,12 +200,19 @@ int lh_tick() {
 	
 	/* read any packets in our buffer */
 	sz = sizeof(pkt);
-	printf("[corelib] [linkhelper] checking for packets from kernel thread\n");
+	printf("[%s] [corelib] [linkhelper] checking for packets from kernel thread\n", glh.dbgname);
 	while (er_read_nbio(&__corelib_rx, &pkt[0], &sz)) {
-		printf("[corelib] [linkhelper] got pkt type:%x\n", pkt[0]);
+		printf("[%s] [corelib] [linkhelper] got pkt type:%x\n", glh.dbgname, pkt[0]);
 		switch (pkt[0]) {
+			case KMSG_REQSHAREDOK:
+				printf("[%s] [corelib] [lh] got KMSG_REQSHAREDOK\n", glh.dbgname);
+				break;
+			case KMSG_REQSHAREDFAIL:
+				printf("[%s] [corelib] [linkhelper] got KMSG_REQSHAREDFAIL\n", glh.dbgname);
+				glh.handler_linkfailed(glh.handler_arg, pkt[1]);
+				break;
 			case KMSG_REQSHARED:
-				printf("[corelib] [linkhelper] got REQSHARED\n");
+				printf("[%s] [corelib] [linkhelper] got REQSHARED\n", glh.dbgname);
 				
 				if (glh.handler_linkreq) {
 					if (!glh.handler_linkreq(glh.handler_arg, pkt[4], pkt[5], pkt[7])) {
@@ -187,34 +237,9 @@ int lh_tick() {
 					[11] - rx entry size
 				*/
 				
-				for (x = 0; x < glh.arraymax; ++x) {
-					if (!glh.array[x]) {
-						break;
-					}
-				}
 				
-				if (x >= glh.arraymax) {
-					/*
-						The array is not big enough. We need to reallocate it, and
-						then also set 'x' to a free slot index.
-					
-						(1) save old pointer
-						(2) alloc array at double current size
-						(3) clear array to zeros
-						(4) copy old array on top
-						(5) set 'x' to next free slot
-						(6) increase arraymax by *2
-						(7) free old array
-					*/
-					tmp = glh.array;
-					glh.array = (CORELIB_LINK**)malloc(sizeof(CORELIB_LINK*) * glh.arraymax * 2);
-					memset(glh.array, 0, sizeof(CORELIB_LINK*) * glh.arraymax * 2);
-					memcpy(glh.array, tmp, sizeof(CORELIB_LINK*) * glh.arraymax);
-					x = glh.arraymax;
-					glh.arraymax = glh.arraymax * 2;
-					free(tmp);
-				}
-				
+				x = lh_getnewsignalid();
+								
 				pkt[0] = KMSG_ACPSHARED;
 				pkt[12] = pkt[11];							/* save RX entry size */
 				pkt[11] = pkt[10];							/* save TX entry size */
@@ -223,15 +248,17 @@ int lh_tick() {
 				pkt[8] = pkt[6];							/* save requester specified signal */
 				pkt[6] = pkt[1];							/* set target RID */
 				pkt[1] = 0x34;								/* set our RID */
+				pkt[13] = pkt[7];
 				pkt[7] = x;									/* set our signal (what signal remote uses) */
 				
 				if (!er_write_nbio(&__corelib_tx, &pkt[0], sz)) {
-					printf("[corelib] [linkhelper] write failed\n");
+					printf("[%s] [corelib] [linkhelper] write failed\n", glh.dbgname);
 				}
 				notifykserver();
 				break;
-			case KMSG_ACPSHAREDOK:
-				printf("[directory] IPC connection established addr:%x\n", pkt[2]);
+			case KMSG_ACPSHAREDREQUESTOR:
+			case KMSG_ACPSHAREDACCEPTOR:
+				printf("[%s] [corelib] [lh] IPC connection established addr:%x\n", glh.dbgname, pkt[2]);
 				
 				/*
 					[0] - packet type
@@ -250,33 +277,68 @@ int lh_tick() {
 				/* @[LINK-ESTABLISHMENT] */
 				link = (CORELIB_LINK*)malloc(sizeof(CORELIB_LINK));	
 	
-				link->rsignal = pkt[8];
-				link->lsignal = pkt[7];
+				if (pkt[0] == KMSG_ACPSHAREDREQUESTOR) {
+					link->rsignal = pkt[7];
+					link->lsignal = pkt[8];
+					link->rxsize = pkt[10];
+					link->txsize = pkt[9];					
+				} else {
+					link->rsignal = pkt[8];
+					link->lsignal = pkt[7];
+					link->rxsize = pkt[9];
+					link->txsize = pkt[10];
+				}
 				link->addr = pkt[2];
 				link->pcnt = pkt[3];
 				link->process = pkt[4];
 				link->thread = pkt[5];
-				link->rxsize = pkt[9];
-				link->txsize = pkt[10];
-			
+				
+				printf("[%s] link->rsignal:%x link->lsignal:%x link->addr:%x link->pcnt:%x\n",
+					glh.dbgname,
+					link->rsignal, link->lsignal, link->addr, link->pcnt
+				);
+				
+				printf("[%s] link->process:%x link->thread:%x link->rxsize:%x link->txsize:%x\n",
+					glh.dbgname,
+					link->process, link->thread, link->rxsize, link->txsize
+				);
+				
 				glh.array[link->lsignal] = link;
+
 	
 				/* not entry based (variable) */
 				link->rxesz = 0;
 				link->txesz = 0;
 	
-				switch (pkt[7]) {
+				for (x = 0; x < 12; ++x) {
+					printf("%x:%x\n", x, pkt[x]);
+				}
+				
+	
+				switch (pkt[13]) {
 					case IPC_PROTO_RB:
+						printf("[%s] [corelib] [lh] protocol set as IPC_PROTO_RB\n", glh.dbgname);
 						link->wnbio = (LH_WRITE_NBIO)rb_write_nbio;
 						link->rnbio = (LH_READ_NBIO)rb_read_nbio;
 						link->pnbio = 0;					/* not supported */
-						link->rx = malloc(sizeof(ERH));
-						link->tx = malloc(sizeof(ERH));
+						link->rx = malloc(sizeof(RBM));
+						link->tx = malloc(sizeof(RBM));
+						
+						/* we have to swap the RX and TX for requestor */
+						if (pkt[0] == KMSG_ACPSHAREDREQUESTOR) {
+							rb_ready((RBM*)link->rx, (void*)(link->addr + link->rxsize), link->rxsize);
+							rb_ready((RBM*)link->tx, (void*)link->addr, link->txsize);
+						} else {
+							rb_ready((RBM*)link->rx, (void*)link->addr, link->rxsize);
+							rb_ready((RBM*)link->tx, (void*)(link->addr + link->rxsize), link->txsize);
+						}
 						break;
 					case IPC_PROTO_ER:
 						/* entry based non-variable */
+						printf("[%s] [corelib] [lh] protocol set as IPC_PROTO_ER\n", glh.dbgname);
 						link->rx = malloc(sizeof(ERH));
 						link->tx = malloc(sizeof(ERH));
+						
 						link->rxesz = pkt[11];
 						link->txesz = pkt[12];
 						link->wnbio = (LH_WRITE_NBIO)er_write_nbio;
@@ -288,15 +350,20 @@ int lh_tick() {
 							writers; lock can be optional (or it will fail if
 							required)
 						*/
-						er_ready(link->rx, (void*)link->addr, link->rxsize,  link->rxesz, 0);
-						er_ready(link->tx, (void*)(link->addr + link->rxsize), link->txsize, link->txesz, &katomic_lockspin_yield8nr);
+						if (pkt[0] == KMSG_ACPSHAREDREQUESTOR) {
+							er_ready(link->rx, (void*)(link->addr + link->rxsize), link->rxsize,  link->rxesz, 0);
+							er_ready(link->tx, (void*)link->addr, link->txsize, link->txesz, &katomic_lockspin_yield8nr);
+						} else {
+							er_ready(link->rx, (void*)link->addr, link->rxsize,  link->rxesz, 0);
+							er_ready(link->tx, (void*)(link->addr + link->rxsize), link->txsize, link->txesz, &katomic_lockspin_yield8nr);
+						}
 						break;
 					default:
 						/* unsupported protocol type (link has to be configured manually) */
 						link->wnbio = 0;
 						link->rnbio = 0;
 						link->pnbio = 0;
-						printf("[corelib] [linkhelper] UNSUPPORTED PROTOCOL:%x\n", pkt[7]);
+						printf("[%s] [corelib] [linkhelper] UNSUPPORTED PROTOCOL:%x\n", glh.dbgname, pkt[13]);
 						/* TODO: add better handling (such as user callback) */
 						break;
 				}
@@ -310,17 +377,17 @@ int lh_tick() {
 				glh.handler_kmsg(glh.handler_arg, pkt, sz);
 				break;
 		}
-		printf("[corelib] [linkhelper] ... loop\n");
+		printf("[%s] [corelib] [linkhelper] ... loop\n", glh.dbgname);
 		sz = sizeof(pkt);
 	}
-	printf("[corelib] [linkhelper] reading any signals\n");
+	printf("[%s] [corelib] [linkhelper] reading any signals\n", glh.dbgname);
 	/* read any signals and check corrosponding link */
 	while (getsignal(&tarproc, &tarsignal)) {
-		printf("[corelib] [linkhelper] got signal %x from process %x\n", tarsignal, tarproc);
+		printf("[%s] [corelib] [linkhelper] got signal %x from process %x\n", glh.dbgname, tarsignal, tarproc);
 		/* if too high just ignore it */
 		if (tarsignal >= glh.arraymax) {
-			printf("[corelib] [linkhelper] tarsignal:%x > arraymax:%x\n",
-				tarsignal, glh.arraymax
+			printf("[%s] [corelib] [linkhelper] tarsignal:%x > arraymax:%x\n",
+				glh.dbgname, tarsignal, glh.arraymax
 			);
 			continue;
 		}
@@ -328,11 +395,11 @@ int lh_tick() {
 		link = glh.array[tarsignal];
 		
 		if (!link) {
-			printf("[corelib] [linkhelper] link invalid for signal\n");
+			printf("[%s] [corelib] [linkhelper] link invalid for signal\n", glh.dbgname);
 			continue;
 		}
 		
-		printf("[corelib] [linkhelper] reading link by signal %x (process:%x)\n", tarsignal, link->process);
+		printf("[%s] [corelib] [linkhelper] reading link by signal %x (process:%x)\n", glh.dbgname, tarsignal, link->process);
 		/* read all packets from link */
 		//sz = sizeof(pkt);
 		/*
@@ -356,7 +423,8 @@ int lh_tick() {
 		}
 	}
 	
-	printf("[corelib] [linkhelper] thinking about dropping dead links.. passed:%x expire:%x last:%x\n",
+	printf("[%s] [corelib] [linkhelper] thinking about dropping dead links.. passed:%x expire:%x last:%x\n",
+		glh.dbgname,
 		getosticks() - gldlc,
 		gldlctime,
 		gldlc
@@ -364,13 +432,13 @@ int lh_tick() {
 	if (getosticks() - gldlc > gldlctime) {
 		gldlc = getosticks();
 		printf("gldlc:%x\n", gldlc);
-		printf("[corelib] [linkhelper] looking for dead links glh.root:%x\n", glh.root);
+		printf("[%s] [corelib] [linkhelper] looking for dead links glh.root:%x\n", glh.dbgname, glh.root);
 		/* checking for dead links .. one method to handle terminations */
 		for (link = glh.root; link; link = nlink) {
 			nlink = link->next;
-			printf("calling getvirtref\n");
+			printf("	calling getvirtref\n");
 			if (getvirtref(link->addr) < 2) {
-				printf("dropping link\n");
+				printf("	dropping link\n");
 				if (glh.handler_linkdropped) {
 					if (!glh.handler_linkdropped(
 							glh.handler_arg,
@@ -382,7 +450,7 @@ int lh_tick() {
 				}
 				vfree(link->addr, link->pcnt);
 				ll_rem((void**)&glh.root, link);
-				printf("[corelib] [linkhelper] dropped link for process:%x addr:%x(%x)\n", link->process, link->addr, link->pcnt);
+				printf("[%s] [corelib] [linkhelper] dropped link for process:%x addr:%x(%x)\n", glh.dbgname, link->process, link->addr, link->pcnt);
 				free(link);
 			}
 		}

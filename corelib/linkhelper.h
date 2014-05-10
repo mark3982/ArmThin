@@ -44,6 +44,7 @@ typedef int (*LH_LINKREQ)(void *arg, uintptr process, uintptr thread, uint32 pro
 typedef int (*LH_LINKDROPPED)(void *arg, CORELIB_LINK *link);
 typedef int (*LH_LINKESTABLISHED)(void *arg, CORELIB_LINK *link);
 typedef int (*LH_KMSG)(void *arg, uint32 *pkt, uint32 sz);
+typedef int (*LH_LINKFAILED)(void *arg, uint32 rid);
 
 typedef struct _CORELIB_LINKHELPER {
 	/* @sdescription:		Root link to linked list of link structures. */
@@ -57,7 +58,11 @@ typedef struct _CORELIB_LINKHELPER {
 	LH_LINKDROPPED		handler_linkdropped;
 	LH_LINKESTABLISHED	handler_linkestablished;
 	LH_KMSG				handler_kmsg;
+	LH_LINKFAILED		handler_linkfailed;
 	void				*handler_arg;
+	
+	char				*dbgname;
+	
 	/*
 		@sdescription: 		Fast maps signal to corelib link.
 		@ldescription:		The signal directly indexs into this array which
@@ -74,12 +79,19 @@ int lh_read_nbio(CORELIB_LINK *link, void *p, uint32 *sz);
 int lh_peek_nbio(CORELIB_LINK *link, void *p, uint32 *sz, uint8 **mndx);
 
 /* callback setters */
+void lh_setlinkfailed(LH_LINKFAILED h);
 void lh_setkmsg(LH_KMSG h);
 void lh_setpktarrived(LH_PKTARRIVED h);
 void lh_setlinkreq(LH_LINKREQ h);
 void lh_setlinkdropped(LH_LINKDROPPED h);
 void lh_setlinkestablished(LH_LINKESTABLISHED h);
 void lh_setoptarg(void *arg);
+
+/* debug */
+void lh_setdbgname(char *dbgname);
+
+/* internal */
+uint32 lh_getnewsignalid();
 
 /* core functions */
 int lh_init();

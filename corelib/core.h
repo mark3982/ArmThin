@@ -19,6 +19,8 @@ void yield();
 uint32 getTicksPerSecond();
 uint32 getosticks();
 uint32 sleepticks(uint32 timeout);
+uint32 getosticks();
+void switchto(uintptr proc, uintptr thread);
 
 /* memory management */
 uintptr getpagesize();

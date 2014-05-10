@@ -5,11 +5,17 @@
 #include <corelib/vmessage.h>
 
 VMESSAGES			vmsgs;
+uint32				bytes = 0;
+
 
 int main_pktarrived(void *arg, CORELIB_LINK *link) {
 	VMESSAGE			*msg;
 	void				*buf;
 	uint32				sz;
+	uint8				*buf8;
+	uint32				x;
+	uint32				avg;
+	uint32				tps;
 	
 	buf = malloc(link->rxesz);
 	
@@ -18,13 +24,26 @@ int main_pktarrived(void *arg, CORELIB_LINK *link) {
 	sz = link->rxesz;
 	if (lh_read_nbio(link, buf, &sz)) {
 		/* let us see if it is a v-message */
-		if (vmsg_checkread(&vmsgs, buf, link->rxesz, &msg)) {
+		//if (vmsg_checkread(&vmsgs, buf, link->rxesz, &msg)) {
 			/* we have a v-message */
 			
 			/* we are done processing message (free resources) */
-			vmsg_discard(&vmsgs, msg);
-		}
+		//	vmsg_discard(&vmsgs, msg);
+		//}
+	} else {
+		return 1;
 	}
+	
+	bytes = bytes + sz;
+	
+	tps = getTicksPerSecond();
+	avg = bytes / (getosticks() / tps);
+	printf("%x bytes/tick  %x bytes\n", avg, bytes);
+	
+	//buf8 = (uint8*)buf;
+	//for (x = 0; x < 5; ++x) {
+	//	printf("	pkt[0]:%x\n", buf8[x]);
+	//}
 	
 	free(buf);
 	
@@ -53,6 +72,8 @@ int main() {
 	uint32			pkt[32];
 	uint32			sz;
 	
+	bytes = 0;
+	
 	/* initialize v-messages structure */
 	vmsg_init(&vmsgs);
 	
@@ -68,6 +89,7 @@ int main() {
 	
 	lh_init();
 	
+	lh_setdbgname("directory");
 	lh_setoptarg(0);
 	lh_setpktarrived(&main_pktarrived);
 	lh_setlinkreq(&main_linkreq);

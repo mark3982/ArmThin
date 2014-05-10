@@ -67,7 +67,7 @@ int er_waworr(ERH *tx, ERH *rx, void *out, uint32 sz, uint32 rid32ndx, uint32 ri
 	/* alert thread that a message has arrived */
 	if (tx->rproc == 0 && tx->rthread == 0) {
 		/* kthread uses a more efficent signal and wakeup system */
-		asm volatile ("swi %[code]" : : [code]"i" (KSWI_KERNELMSG));
+		notifykserver();
 	} else {
 		/* send a signal then wake up thread incase it is sleeping */
 		signal(tx->rproc, tx->rthread, tx->signal);
@@ -136,18 +136,29 @@ int main_pktarrived(void *arg, CORELIB_LINK *link) {
 	@param:rxesz:			(if entry based) entry size
 	@param:txesz:			(if entry based) entry size
 */
-int lh_establishlink(uint32 rprocess, uint32 rthread, uint32 proto, uint32 rxsz, uint32 txsz, uint32 rxesz, uint32 txesz) {
+
+int lh_establishlink(uint32 rprocess, uint32 rthread, uint32 proto, uint32 rxsz, uint32 txsz, uint32 rxesz, uint32 txesz, uint32 rid) {
 	uint32		pkt[12];
-	uint32		rid;
 	uint32		lsignal;
 	uint32		addr;
+	uint32		psize;
+	uint32		pcnt;
+	int			res;
 	
-	rid = lh_getrid();
-	lsignal = lg_getlsignal();
 	
-	addr = lh_getmemory(rxsz + txsz);
-	pcnt = PAGERNDUP((rxsz + txsz) / pagesize);
-				   
+	printf("getting lsignal\n");
+	/* come back and fix this */
+	lsignal = lh_getnewsignalid();
+	printf("got lsignal\n");
+	
+	/* get total memory needed then round up to nearest whole page */
+	pcnt = rxsz + txsz;
+	psize = getpagesize();
+	pcnt = (pcnt / psize) * psize < pcnt ? (pcnt / psize) + 1 : pcnt / psize;
+	/* allocate memory */
+	addr = valloc(pcnt);
+	
+	/* build the packet */
 	pkt[0] = KMSG_REQSHARED;
 	pkt[1] = rid;					/* request id */
 	pkt[2] = addr;					/* address of memory */
@@ -161,7 +172,16 @@ int lh_establishlink(uint32 rprocess, uint32 rthread, uint32 proto, uint32 rxsz,
 	pkt[10] = rxesz;				/* size of rx entry */	
 	pkt[11] = txesz;				/* size of tx entry */
 
-	return er_write_nbio(&__corelib_tx, &pkt[0], sizeof(pkt));
+	/* kernel message */
+	res = er_write_nbio(&__corelib_tx, &pkt[0], sizeof(pkt));
+	if (!res) {
+		return res;
+	}
+	
+	/* notify kernel of message */
+	notifykserver();
+	
+	return res;
 	
 	//er_waworr(&__corelib_tx, &__corelib_rx, &pkt[0], 10 * 4, 1, pkt[1], 0);
 	//printf("[lh] got response from kserver type:%x\n", pkt[0]);
@@ -171,7 +191,6 @@ int lh_establishlink(uint32 rprocess, uint32 rthread, uint32 proto, uint32 rxsz,
 	//	printf("[lh] timeout waiting for reply! HALTED\n");
 	//	return 0;
 	//}
-	return 1;
 }
 
 
@@ -181,17 +200,40 @@ int main_kmsg(void *arg, uint32 *pkt, uint32 sz) {
 }
 
 int main_linkreq(void *arg, uintptr process, uintptr thread, uint32 proto) {
-	printf("[directory] link request process:%x thread:%x proto:%x\n", process, thread, proto);
+	printf("[testuelf] link request process:%x thread:%x proto:%x\n", process, thread, proto);
 	return 1;
 }
 
 int main_linkdropped(void *arg, CORELIB_LINK *link) {
-	printf("[directory] link dropped link:%x\n", link);
+	printf("[testuelf] link dropped link:%x\n", link);
+	return 1;
+}
+
+int main_linkfailed(void *arg, uint32 rid) {
+	printf("[testuelf] link failed rid:%x\n", rid);
 	return 1;
 }
 
 int main_linkestablished(void *arg, CORELIB_LINK *link) {
-	printf("[directory] link established link:%x\n", link);
+	uint8		pkt[16 * 4];
+
+	printf("[app] link established link:%x\n", link);
+	//int lh_write_nbio(CORELIB_LINK *link, void *p, uint32 sz);
+	printf("[testuelf] SENDING HELLO\n");
+	
+	pkt[0] = 0xaa;
+	pkt[1] = 0xbb;
+	pkt[2] = 0xcc;
+	pkt[3] = 0xdd;
+	for (;;) {
+		if (!lh_write_nbio(link, pkt, sizeof(pkt))) {
+			signal(link->process, link->thread, link->rsignal);
+			wakeup(link->process, link->thread);
+			switchto(link->process, link->thread);
+			yield();
+		}
+		
+	}
 	return 1;
 }
 
@@ -207,6 +249,15 @@ int main() {
 	uintptr			dirproc;
 	uintptr			dirthread;
 	uintptr			dirsignal;
+
+	lh_init();
+	lh_setdbgname("testuelf");
+	lh_setoptarg(0);
+	lh_setpktarrived(&main_pktarrived);
+	lh_setlinkreq(&main_linkreq);
+	lh_setlinkdropped(&main_linkdropped);
+	lh_setlinkestablished(&main_linkestablished);
+	lh_setkmsg(&main_kmsg);
 	
 	smmio = (unsigned int*)0xa0000000;
 	
@@ -270,7 +321,7 @@ int main() {
 	}
 	
 	/* request link to remote directory service */
-	if (!lh_establishlink(dirproc, dirthread, KPROTO_ENTRYRING, 4096 >> 1, 4096 >> 1, 16 * 4, 16 * 4)) {
+	if (!lh_establishlink(dirproc, dirthread, IPC_PROTO_ER, 4096 >> 1, 4096 >> 1, 16 * 4, 16 * 4, 0x12345678)) {
 		printf("[app] establish link failed\n");
 		return -1;
 	}
@@ -284,16 +335,6 @@ int main() {
 	
 	/* set signal for directory to notify it which IPC connection to read from */
 	//signal(dirproc, dirthread, dirsignal);	
-
-	/* go into linkhelper mode */
-	lh_init();
-	
-	lh_setoptarg(0);
-	lh_setpktarrived(&main_pktarrived);
-	lh_setlinkreq(&main_linkreq);
-	lh_setlinkdropped(&main_linkdropped);
-	lh_setlinkestablished(&main_linkestablished);
-	lh_setkmsg(&main_kmsg);
 	
 	while (1) {
 		/* we can do anything we need to do in here and adjust lh_sleep */
