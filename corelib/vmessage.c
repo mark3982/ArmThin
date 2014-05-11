@@ -48,6 +48,8 @@ int vmsg_disect(void *buf, uint16 *id, uint8 *total, uint8 *index) {
 		return 0;
 	}
 	
+	printf("	disect-hdr:%x\n", _buf[0]);
+	
 	*id = (_buf[0] >> 16) & 0x7fff;
 	*total = (_buf[0] >> 8) & 0xff;
 	*index = _buf[0] & 0xff;
@@ -80,6 +82,8 @@ int vmsg_write(CORELIB_LINK *link, void *buf, uint32 bufsz, uint32 esz) {
 	
 	for (x = 0; x < pcnt; ++x) {
 		((uint32*)lbuf)[0] = 0x80000000 | (id << 16) | (pcnt << 8) | x;
+		printf("	vmsg write header; hdr:%x\n", ((uint32*)lbuf)[0]);
+		
 		for (y = 0; y < esz; ++y) {
 			/* incoming buffer might be slightly smaller */
 			if (x * esz + y > bufsz) {
@@ -88,6 +92,8 @@ int vmsg_write(CORELIB_LINK *link, void *buf, uint32 bufsz, uint32 esz) {
 			/* transfer byte */
 			lbuf[4 + y] = ((uint8*)buf)[x * esz + y]; 
 		}
+		
+		printf("	vmsg write header; hdr:%x\n", ((uint32*)lbuf)[0]);
 		/* write v-message part (including 4-byte header) */
 		while (!lh_write_nbio(link, lbuf, esz + 4)) {
 			/* well.. the link's TX is likely full.. 
@@ -96,6 +102,7 @@ int vmsg_write(CORELIB_LINK *link, void *buf, uint32 bufsz, uint32 esz) {
 			*/
 			yield();
 		}
+		printf("	wrote vmsg part #%x totcnt:%x\n", x, pcnt);
 	}
 	
 	free(lbuf);
@@ -116,11 +123,18 @@ int vmsg_checkread(VMESSAGES *h, void *buf, uint32 esz, VMESSAGE **out) {
 	uint8			total;
 	uint8			index;
 	
+	printf("	vmsg_checkread:");
+	for (id = 0; id < 8; ++id) {
+		printf("[%x]", ((uint8*)buf)[id]);
+	}
+	printf("\n");
+	
 	if (vmsg_disect(buf, &id, &total, &index)) {
 		/*
 			process the message AND if completed return value set to signal so and
 			out will be set to the completed v-message structure
 		*/
+		printf("	vmsg-disect id:%x total:%x index:%x\n", id, total, index);
 		return vmsg_readex(h, id, total, index, (void*)((uintptr)buf + 4), esz, out);
 	}
 	/* the message was not a v-message */
@@ -182,9 +196,13 @@ int vmsg_readex(VMESSAGES *h, uint16 id, uint8 total, uint8 index, void *buf, ui
 	m->totcnt = total;
 	ll_add((void**)&h->fmsg, m);
 	
+	printf("	created new vmsg buffer m->size:%x\n", m->size);
+	
 	if (__vmsg_pktwrite(m, index, esz, buf)) {
+		printf("	m:%x index:%x esz:%x buf:%x\n", m, index, esz, buf);
 		ll_rem((void**)&h->fmsg, m);
 		*out = m;
+		printf("	got whole message on part#0\n");
 		return 1;
 	}
 	

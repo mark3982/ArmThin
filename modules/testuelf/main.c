@@ -144,6 +144,7 @@ int lh_establishlink(uint32 rprocess, uint32 rthread, uint32 proto, uint32 rxsz,
 	uint32		psize;
 	uint32		pcnt;
 	int			res;
+	ERH			erh;
 	
 	
 	printf("getting lsignal\n");
@@ -157,6 +158,26 @@ int lh_establishlink(uint32 rprocess, uint32 rthread, uint32 proto, uint32 rxsz,
 	pcnt = (pcnt / psize) * psize < pcnt ? (pcnt / psize) + 1 : pcnt / psize;
 	/* allocate memory */
 	addr = valloc(pcnt);
+	
+	/*
+		initialize the protocol if needed
+	*/
+	switch (proto) {
+		case IPC_PROTO_ER:
+			/*
+				if we wait to initialize then we might end up 
+				presenting the remote with a bad view and it
+				might read up non-existant packets; so let us
+				try to initiaize it in place with a temporary
+				header that we discard
+			*/
+			er_init(&erh, (void*)(addr + rxsz), rxsz,  rxesz, 0);
+			er_init(&erh, (void*)addr, txsz, txesz, 0);
+			break;
+		default:
+			memset((void*)addr, 0, pcnt * psize);
+			break;
+	}
 	
 	/* build the packet */
 	pkt[0] = KMSG_REQSHARED;
@@ -226,12 +247,18 @@ int main_linkestablished(void *arg, CORELIB_LINK *link) {
 	pkt[2] = 0xcc;
 	pkt[3] = 0xdd;
 	for (;;) {
-		if (!lh_write_nbio(link, pkt, sizeof(pkt))) {
-			signal(link->process, link->thread, link->rsignal);
-			wakeup(link->process, link->thread);
-			switchto(link->process, link->thread);
-			yield();
-		}
+		//if (!lh_write_nbio(link, pkt, sizeof(pkt))) {
+		//	signal(link->process, link->thread, link->rsignal);
+			//wakeup(link->process, link->thread);
+		//	switchto(link->process, link->thread);
+		//}
+		
+		//int vmsg_write(CORELIB_LINK *link, void *buf, uint32 bufsz, uint32 esz);
+		printf("sending vmsg\n");
+		vmsg_write(link, "hello world", 12, link->txesz);
+		signal(link->process, link->thread, link->rsignal);
+		switchto(link->process, link->thread);
+		sleep(5);
 		
 	}
 	return 1;
@@ -321,7 +348,7 @@ int main() {
 	}
 	
 	/* request link to remote directory service */
-	if (!lh_establishlink(dirproc, dirthread, IPC_PROTO_ER, 4096 >> 1, 4096 >> 1, 16 * 4, 16 * 4, 0x12345678)) {
+	if (!lh_establishlink(dirproc, dirthread, IPC_PROTO_ER, 2048, 2048 * 4, 16 * 4, 16 * 4, 0x12345678)) {
 		printf("[app] establish link failed\n");
 		return -1;
 	}

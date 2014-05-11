@@ -4,8 +4,8 @@
 #include <corelib/linkhelper.h>
 #include <corelib/vmessage.h>
 
-VMESSAGES			vmsgs;
-uint32				bytes = 0;
+static VMESSAGES			vmsgs;
+static uint32				tps;
 
 
 int main_pktarrived(void *arg, CORELIB_LINK *link) {
@@ -15,37 +15,26 @@ int main_pktarrived(void *arg, CORELIB_LINK *link) {
 	uint8				*buf8;
 	uint32				x;
 	uint32				avg;
-	uint32				tps;
 	
 	buf = malloc(link->rxesz);
 	
 	printf("[directory] packet arrived link:%x\n", link);
 	
 	sz = link->rxesz;
-	if (lh_read_nbio(link, buf, &sz)) {
+	while (lh_read_nbio(link, buf, &sz)) {
+		printf("reading packet\n");
 		/* let us see if it is a v-message */
-		//if (vmsg_checkread(&vmsgs, buf, link->rxesz, &msg)) {
+		if (vmsg_checkread(&vmsgs, buf, link->rxesz, &msg)) {
 			/* we have a v-message */
+			printf("vmsg:%s\n", buf);
 			
 			/* we are done processing message (free resources) */
-		//	vmsg_discard(&vmsgs, msg);
-		//}
-	} else {
-		return 1;
+			vmsg_discard(&vmsgs, msg);
+		}
+
+		
+		sz = link->rxesz;
 	}
-	
-	bytes = bytes + sz;
-	
-	tps = getTicksPerSecond();
-	avg = bytes / (getosticks() / tps);
-	printf("%x bytes/tick  %x bytes\n", avg, bytes);
-	
-	//buf8 = (uint8*)buf;
-	//for (x = 0; x < 5; ++x) {
-	//	printf("	pkt[0]:%x\n", buf8[x]);
-	//}
-	
-	free(buf);
 	
 	return 1;
 }
@@ -72,7 +61,7 @@ int main() {
 	uint32			pkt[32];
 	uint32			sz;
 	
-	bytes = 0;
+	tps = getTicksPerSecond();
 	
 	/* initialize v-messages structure */
 	vmsg_init(&vmsgs);

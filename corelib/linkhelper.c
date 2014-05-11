@@ -1,5 +1,7 @@
 #include <corelib/linkhelper.h>
 
+#define dprintf //
+
 /* 
 	This just places a layer
 	between the application containing a lot of code that would be duplicated
@@ -137,13 +139,13 @@ int lh_sleep(uint32 timeout) {
 	
 	osticks = getosticks();
 	
-	printf("osticks:%x gldlctime:%x\n", osticks, gldlctime);
+	dprintf("osticks:%x gldlctime:%x\n", osticks, gldlctime);
 	
 	_timeout = gldlctime > (osticks - gldlc) ? gldlctime - (osticks - gldlc) : 1;
 	if (timeout != 0 && timeout < _timeout) {
 		_timeout = timeout;
 	}
-	printf("[corelib] [linkhelper] sleep for %x\n", _timeout);
+	dprintf("[corelib] [linkhelper] sleep for %x\n", _timeout);
 	sleepticks(_timeout);
 }
 
@@ -151,13 +153,13 @@ uint32 lh_getnewsignalid() {
 	uint32		x;
 	void		*tmp;
 	
-	printf("CCCC max:%x array:%x\n", glh.arraymax, glh.array);
+	dprintf("CCCC max:%x array:%x\n", glh.arraymax, glh.array);
 	for (x = 10; x < glh.arraymax; ++x) {
 		if (!glh.array[x]) {
 			break;
 		}
 	}
-	printf("AAAA x:%x\n", x);
+	dprintf("AAAA x:%x\n", x);
 	if (x >= glh.arraymax) {
 		/*
 			The array is not big enough. We need to reallocate it, and
@@ -180,7 +182,7 @@ uint32 lh_getnewsignalid() {
 		free(tmp);
 	}
 	
-	printf("[%s] [corelib] [lh_getnewsignalid=%x]\n", glh.dbgname, x);
+	dprintf("[%s] [corelib] [lh_getnewsignalid=%x]\n", glh.dbgname, x);
 	
 	return x;
 }
@@ -200,19 +202,19 @@ int lh_tick() {
 	
 	/* read any packets in our buffer */
 	sz = sizeof(pkt);
-	printf("[%s] [corelib] [linkhelper] checking for packets from kernel thread\n", glh.dbgname);
+	dprintf("[%s] [corelib] [linkhelper] checking for packets from kernel thread\n", glh.dbgname);
 	while (er_read_nbio(&__corelib_rx, &pkt[0], &sz)) {
-		printf("[%s] [corelib] [linkhelper] got pkt type:%x\n", glh.dbgname, pkt[0]);
+		dprintf("[%s] [corelib] [linkhelper] got pkt type:%x\n", glh.dbgname, pkt[0]);
 		switch (pkt[0]) {
 			case KMSG_REQSHAREDOK:
-				printf("[%s] [corelib] [lh] got KMSG_REQSHAREDOK\n", glh.dbgname);
+				dprintf("[%s] [corelib] [lh] got KMSG_REQSHAREDOK\n", glh.dbgname);
 				break;
 			case KMSG_REQSHAREDFAIL:
-				printf("[%s] [corelib] [linkhelper] got KMSG_REQSHAREDFAIL\n", glh.dbgname);
+				dprintf("[%s] [corelib] [linkhelper] got KMSG_REQSHAREDFAIL\n", glh.dbgname);
 				glh.handler_linkfailed(glh.handler_arg, pkt[1]);
 				break;
 			case KMSG_REQSHARED:
-				printf("[%s] [corelib] [linkhelper] got REQSHARED\n", glh.dbgname);
+				dprintf("[%s] [corelib] [linkhelper] got REQSHARED\n", glh.dbgname);
 				
 				if (glh.handler_linkreq) {
 					if (!glh.handler_linkreq(glh.handler_arg, pkt[4], pkt[5], pkt[7])) {
@@ -252,13 +254,13 @@ int lh_tick() {
 				pkt[7] = x;									/* set our signal (what signal remote uses) */
 				
 				if (!er_write_nbio(&__corelib_tx, &pkt[0], sz)) {
-					printf("[%s] [corelib] [linkhelper] write failed\n", glh.dbgname);
+					dprintf("[%s] [corelib] [linkhelper] write failed\n", glh.dbgname);
 				}
 				notifykserver();
 				break;
 			case KMSG_ACPSHAREDREQUESTOR:
 			case KMSG_ACPSHAREDACCEPTOR:
-				printf("[%s] [corelib] [lh] IPC connection established addr:%x\n", glh.dbgname, pkt[2]);
+				dprintf("[%s] [corelib] [lh] IPC connection established addr:%x\n", glh.dbgname, pkt[2]);
 				
 				/*
 					[0] - packet type
@@ -293,12 +295,12 @@ int lh_tick() {
 				link->process = pkt[4];
 				link->thread = pkt[5];
 				
-				printf("[%s] link->rsignal:%x link->lsignal:%x link->addr:%x link->pcnt:%x\n",
+				dprintf("[%s] link->rsignal:%x link->lsignal:%x link->addr:%x link->pcnt:%x\n",
 					glh.dbgname,
 					link->rsignal, link->lsignal, link->addr, link->pcnt
 				);
 				
-				printf("[%s] link->process:%x link->thread:%x link->rxsize:%x link->txsize:%x\n",
+				dprintf("[%s] link->process:%x link->thread:%x link->rxsize:%x link->txsize:%x\n",
 					glh.dbgname,
 					link->process, link->thread, link->rxsize, link->txsize
 				);
@@ -311,13 +313,13 @@ int lh_tick() {
 				link->txesz = 0;
 	
 				for (x = 0; x < 12; ++x) {
-					printf("%x:%x\n", x, pkt[x]);
+					dprintf("%x:%x\n", x, pkt[x]);
 				}
 				
 	
 				switch (pkt[13]) {
 					case IPC_PROTO_RB:
-						printf("[%s] [corelib] [lh] protocol set as IPC_PROTO_RB\n", glh.dbgname);
+						dprintf("[%s] [corelib] [lh] protocol set as IPC_PROTO_RB\n", glh.dbgname);
 						link->wnbio = (LH_WRITE_NBIO)rb_write_nbio;
 						link->rnbio = (LH_READ_NBIO)rb_read_nbio;
 						link->pnbio = 0;					/* not supported */
@@ -335,7 +337,7 @@ int lh_tick() {
 						break;
 					case IPC_PROTO_ER:
 						/* entry based non-variable */
-						printf("[%s] [corelib] [lh] protocol set as IPC_PROTO_ER\n", glh.dbgname);
+						dprintf("[%s] [corelib] [lh] protocol set as IPC_PROTO_ER\n", glh.dbgname);
 						link->rx = malloc(sizeof(ERH));
 						link->tx = malloc(sizeof(ERH));
 						
@@ -363,7 +365,7 @@ int lh_tick() {
 						link->wnbio = 0;
 						link->rnbio = 0;
 						link->pnbio = 0;
-						printf("[%s] [corelib] [linkhelper] UNSUPPORTED PROTOCOL:%x\n", glh.dbgname, pkt[13]);
+						dprintf("[%s] [corelib] [linkhelper] UNSUPPORTED PROTOCOL:%x\n", glh.dbgname, pkt[13]);
 						/* TODO: add better handling (such as user callback) */
 						break;
 				}
@@ -377,16 +379,16 @@ int lh_tick() {
 				glh.handler_kmsg(glh.handler_arg, pkt, sz);
 				break;
 		}
-		printf("[%s] [corelib] [linkhelper] ... loop\n", glh.dbgname);
+		dprintf("[%s] [corelib] [linkhelper] ... loop\n", glh.dbgname);
 		sz = sizeof(pkt);
 	}
-	printf("[%s] [corelib] [linkhelper] reading any signals\n", glh.dbgname);
+	dprintf("[%s] [corelib] [linkhelper] reading any signals\n", glh.dbgname);
 	/* read any signals and check corrosponding link */
 	while (getsignal(&tarproc, &tarsignal)) {
-		printf("[%s] [corelib] [linkhelper] got signal %x from process %x\n", glh.dbgname, tarsignal, tarproc);
+		dprintf("[%s] [corelib] [linkhelper] got signal %x from process %x\n", glh.dbgname, tarsignal, tarproc);
 		/* if too high just ignore it */
 		if (tarsignal >= glh.arraymax) {
-			printf("[%s] [corelib] [linkhelper] tarsignal:%x > arraymax:%x\n",
+			dprintf("[%s] [corelib] [linkhelper] tarsignal:%x > arraymax:%x\n",
 				glh.dbgname, tarsignal, glh.arraymax
 			);
 			continue;
@@ -395,11 +397,11 @@ int lh_tick() {
 		link = glh.array[tarsignal];
 		
 		if (!link) {
-			printf("[%s] [corelib] [linkhelper] link invalid for signal\n", glh.dbgname);
+			dprintf("[%s] [corelib] [linkhelper] link invalid for signal\n", glh.dbgname);
 			continue;
 		}
 		
-		printf("[%s] [corelib] [linkhelper] reading link by signal %x (process:%x)\n", glh.dbgname, tarsignal, link->process);
+		dprintf("[%s] [corelib] [linkhelper] reading link by signal %x (process:%x)\n", glh.dbgname, tarsignal, link->process);
 		/* read all packets from link */
 		//sz = sizeof(pkt);
 		/*
@@ -423,22 +425,23 @@ int lh_tick() {
 		}
 	}
 	
-	printf("[%s] [corelib] [linkhelper] thinking about dropping dead links.. passed:%x expire:%x last:%x\n",
+	dprintf("[%s] [corelib] [linkhelper] thinking about dropping dead links.. passed:%x expire:%x last:%x\n",
 		glh.dbgname,
 		getosticks() - gldlc,
 		gldlctime,
 		gldlc
 	);
+	
 	if (getosticks() - gldlc > gldlctime) {
 		gldlc = getosticks();
-		printf("gldlc:%x\n", gldlc);
-		printf("[%s] [corelib] [linkhelper] looking for dead links glh.root:%x\n", glh.dbgname, glh.root);
+		dprintf("gldlc:%x\n", gldlc);
+		dprintf("[%s] [corelib] [linkhelper] looking for dead links glh.root:%x\n", glh.dbgname, glh.root);
 		/* checking for dead links .. one method to handle terminations */
 		for (link = glh.root; link; link = nlink) {
 			nlink = link->next;
-			printf("	calling getvirtref\n");
+			dprintf("	calling getvirtref\n");
 			if (getvirtref(link->addr) < 2) {
-				printf("	dropping link\n");
+				dprintf("	dropping link\n");
 				if (glh.handler_linkdropped) {
 					if (!glh.handler_linkdropped(
 							glh.handler_arg,
@@ -450,7 +453,7 @@ int lh_tick() {
 				}
 				vfree(link->addr, link->pcnt);
 				ll_rem((void**)&glh.root, link);
-				printf("[%s] [corelib] [linkhelper] dropped link for process:%x addr:%x(%x)\n", glh.dbgname, link->process, link->addr, link->pcnt);
+				dprintf("[%s] [corelib] [linkhelper] dropped link for process:%x addr:%x(%x)\n", glh.dbgname, link->process, link->addr, link->pcnt);
 				free(link);
 			}
 		}

@@ -372,7 +372,7 @@ void ksched(KTHREAD *tothread) {
 		kstack_pop(&ks->runnable, (uintptr*)&cs->cthread);
 		cs->cproc = cs->cthread->proc;
 	}
-	kprintf("---------------------------------POPPING THREAD %x %s\n", cs->cproc, cs->cthread->dbgname);
+	//kprintf("---------------------------------POPPING THREAD %x %s\n", cs->cproc, cs->cthread->dbgname);
 	
 	/* hopefully we got something or the system should deadlock */
 	kt = cs->cthread;
@@ -899,7 +899,7 @@ void k_exphandler(uint32 lr, uint32 type) {
 				stk[-13] = 0;			/* just clearing them because the function does not */
 				stk[-12] = 0;			/* ... */
 				stk[-14] = mla_get(&cs->cthread->signals, &out, &out2);
-				dkprintf("KSWI_GETSIGNAL thread:%x ret:%x process:%x signal:%x\n", cs->cthread, stk[-14], out, out2);
+				//dkprintf("KSWI_GETSIGNAL thread:%x ret:%x process:%x signal:%x\n", cs->cthread, stk[-14], out, out2);
 				stk[-13] = out;			/* process */
 				stk[-12] = out2;		/* signal */
 				break;
@@ -1077,8 +1077,8 @@ void k_exphandler(uint32 lr, uint32 type) {
 		for (;;) {
 			r0 = stk[-1];
 			for (x = 0; x < 0xffffff; ++x);
-			dkprintf("!EXCEPTION pc:%x type:%x ks:%x cpu:%x ks->cthread:%x\n", r0, type, ks, cpu, cs->cthread);
-			dkprintf("   CPU:%x type:%x cproc:%x cthread:%x lr:%x dbgname:%s\n", cpu, type, cs->cproc, cs->cthread, lr, cs->cthread ? cs->cthread->dbgname : "$none$");
+			kprintf("!EXCEPTION pc:%x type:%x ks:%x cpu:%x ks->cthread:%x\n", r0, type, ks, cpu, cs->cthread);
+			kprintf("   CPU:%x type:%x cproc:%x cthread:%x lr:%x dbgname:%s\n", cpu, type, cs->cproc, cs->cthread, lr, cs->cthread ? cs->cthread->dbgname : "$none$");
 		
 			asm volatile ("mrs %[tmp0], cpsr \n\
 				 mov %[tmp1], %[tmp0] \n\
@@ -1090,11 +1090,11 @@ void k_exphandler(uint32 lr, uint32 type) {
 				 msr cpsr, %[tmp1] \n\
 				 " : [tmp0]"+r" (r0), [tmp1]"+r" (r1), [sp]"=r" (__sp), [lr]"=r" (__lr));
 			
-			dkprintf("    sp:%x lr:%x\n", __sp, __lr);
+			kprintf("    sp:%x lr:%x\n", __sp, __lr);
 			
 			r0 = stk[-1];
 			r0 = ((uint32*)r0)[0];
-			dkprintf("inst:%x\n", r0);
+			kprintf("inst:%x\n", r0);
 			
 			for (;;);
 		}

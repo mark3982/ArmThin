@@ -49,9 +49,18 @@ int er_init(ERH * erh, void *data, uint32 tsz, uint32 esz, KATOMIC_LOCKSPIN8NR l
 
 
 int er_write_nbio(ERH *erh, void *p, uint32 sz) {
-	uint8			*map;
-	uint32			x, y;
-	uint8			*data;
+	uint8				*map;
+	uint32				x, y;
+	uint8				*data;
+	uint32				ecnt;
+	KATOMIC_LOCKSPIN8NR	lockfp;
+	void				*er;
+	uint32				esz;
+	
+	er = erh->er;
+	ecnt = erh->ecnt;
+	lockfp = erh->lockfp;
+	esz = erh->esz;
 	
 	map = (uint8*)erh->er;
 	
@@ -60,27 +69,36 @@ int er_write_nbio(ERH *erh, void *p, uint32 sz) {
 	//	return -2;
 	//}
 	
-	if (sz > erh->esz) {
+	if (sz > esz) {
 		printf("[er] sz:%x > erh->esz:%x\n", sz, erh->esz);
 		return -1;
 	}
 	
 	/* find entry and lock it */
-	for (x = 0; x < erh->ecnt; ++x) {
+	for (x = 0; x < ecnt; ++x) {
 		/* try to lock it */
 		//printf("[er] <write> checking map[%x]:%x\n", x, map[x]);
 		if (map[x] == 0) {
-			if (erh->lockfp && !erh->lockfp(&map[x], 1)) {
+			if (lockfp && !lockfp(&map[x], 1)) {
 				continue;
 			}
 			//printf("[er] wrote at %x\n", x);
 			/* got lock, now write data */
-			data = (uint8*)((uintptr)erh->er + x * erh->esz);
+			data = (uint8*)((uintptr)er + x * esz);
+			printf("	er_write:");
 			for (y = 0; y < sz; ++y) {
+				printf("[%x]", ((uint8*)p)[y]);
 				data[y] = ((uint8*)p)[y];
 			}
+			printf("\n");
 			/* set valid flag */
 			map[x] = map[x] | 0x80;
+			printf("	map[%x]:%x data:%x\n", x, &map[x], data);
+			printf("	data-re-check:");
+			for (y = 0; y < 6; ++y) {
+				printf("[%x]", data[y]);
+			}
+			printf("\n");
 			return 1;
 		}
 	}
@@ -92,32 +110,33 @@ int er_peek_nbio(ERH *erh, void *p, uint32 *sz, uint8 **mndx) {
 	uint32			x, y;
 	uint8			*map;
 	uint8			*data;
+	uint32			max;
+	uint32			esz;
+	uint32			lsz;
+	void			*er;
 	
 	map = (uint8*)erh->er;
 	
-	x = erh->lpos;
-	y = 0; 
-	while (x != erh->lpos || y == 0) {
-		y = 1;
-		
+	max = erh->ecnt;
+	esz = erh->esz;
+	lsz = *sz;
+	er = erh->er;
+	
+	for (x = 0; x < max; ++x) {
 		//printf("[er] <read> checking map[%x]:%x\n", x, map[x]);
 		if (map[x] & 0x80) {
 			/* found entry, now copy out data */
-			data = (uint8*)((uintptr)erh->er + x * erh->esz);
-			for (y = 0; (y < *sz) && (y < erh->esz); ++y) {
+			data = (uint8*)((uintptr)er + x * esz);
+			printf("	er_read:");
+			for (y = 0; (y < lsz) && (y < esz); ++y) {
 				((uint8*)p)[y] = data[y];
+				printf("[%x]", data[y]);
 			}
-			/* set entry as free */
+			printf("\n");
+			/* set pointer to lockmap byte */
 			*sz = y;
 			*mndx = &map[x];
-			erh->lpos = x + 1;
 			return 1;
-		}
-		
-		++x;
-		/* do wrap around at arbirary value */
-		if (x >= erh->ecnt) {
-			x = 0;
 		}
 	}
 	/* keep erh->lpos the same */
