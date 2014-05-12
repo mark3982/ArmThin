@@ -37,6 +37,8 @@ typedef struct _CORELIB_LINK {
 	uintptr			thread;			/* remote thread identifier */
 	uintptr			rsignal;		/* remote signal value */
 	uintptr			lsignal;		/* local signal value */
+	
+	void			*extra;			/* extra data */
 } CORELIB_LINK;
 
 typedef int (*LH_PKTARRIVED)(void *arg, CORELIB_LINK *link);
@@ -86,6 +88,15 @@ void lh_setlinkreq(LH_LINKREQ h);
 void lh_setlinkdropped(LH_LINKDROPPED h);
 void lh_setlinkestablished(LH_LINKESTABLISHED h);
 void lh_setoptarg(void *arg);
+
+/* extra */
+void lh_setextra(CORELIB_LINK *link, void *extra);
+void *lh_getextra(CORELIB_LINK *link);
+
+/* utility */
+int lh_establishlink(uint32 rprocess, uint32 rthread, uint32 proto, uint32 rxsz, uint32 txsz, uint32 rxesz, uint32 txesz, uint32 rid);
+int er_waworr(ERH *tx, ERH *rx, void *out, uint32 sz, uint32 rid32ndx, uint32 rid, uint32 timeout);
+int er_worr(ERH *rx, void *out, uint32 sz, uint32 rid32ndx, uint32 rid, uint32 timeout);
 
 /* debug */
 void lh_setdbgname(char *dbgname);

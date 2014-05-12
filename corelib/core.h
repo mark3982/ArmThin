@@ -28,6 +28,7 @@ void vfree(uintptr addr, uintptr cnt);
 uintptr valloc(uintptr cnt);
 void *malloc(uint32 size);
 void free(void *ptr);
+int strlen(char *str);
 
 /* random */
 int rand();

@@ -59,14 +59,15 @@ int vmsg_disect(void *buf, uint16 *id, uint8 *total, uint8 *index) {
 /*
 	@sdescription:		Will write a v-message using the standard linkhelper write function.
 */
-int vmsg_write(CORELIB_LINK *link, void *buf, uint32 bufsz, uint32 esz) {
+int vmsg_write(CORELIB_LINK *link, void *buf, uint32 bufsz) {
 	uint32		pcnt;
 	uint32		x, y;
 	uint8		*lbuf;
 	uint16		id;
+	uint32		esz;
 	
 	/* account for header */
-	esz -= 4;
+	esz = link->txesz - 4;
 	/* calculate number of parts */
 	pcnt = (bufsz / esz) * esz < bufsz ? (bufsz / esz) + 1: bufsz / esz;
 	/* sanity check */
@@ -123,18 +124,11 @@ int vmsg_checkread(VMESSAGES *h, void *buf, uint32 esz, VMESSAGE **out) {
 	uint8			total;
 	uint8			index;
 	
-	printf("	vmsg_checkread:");
-	for (id = 0; id < 8; ++id) {
-		printf("[%x]", ((uint8*)buf)[id]);
-	}
-	printf("\n");
-	
 	if (vmsg_disect(buf, &id, &total, &index)) {
 		/*
 			process the message AND if completed return value set to signal so and
 			out will be set to the completed v-message structure
 		*/
-		printf("	vmsg-disect id:%x total:%x index:%x\n", id, total, index);
 		return vmsg_readex(h, id, total, index, (void*)((uintptr)buf + 4), esz, out);
 	}
 	/* the message was not a v-message */
@@ -196,13 +190,9 @@ int vmsg_readex(VMESSAGES *h, uint16 id, uint8 total, uint8 index, void *buf, ui
 	m->totcnt = total;
 	ll_add((void**)&h->fmsg, m);
 	
-	printf("	created new vmsg buffer m->size:%x\n", m->size);
-	
 	if (__vmsg_pktwrite(m, index, esz, buf)) {
-		printf("	m:%x index:%x esz:%x buf:%x\n", m, index, esz, buf);
 		ll_rem((void**)&h->fmsg, m);
 		*out = m;
-		printf("	got whole message on part#0\n");
 		return 1;
 	}
 	

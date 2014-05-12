@@ -84,21 +84,12 @@ int er_write_nbio(ERH *erh, void *p, uint32 sz) {
 			}
 			//printf("[er] wrote at %x\n", x);
 			/* got lock, now write data */
-			data = (uint8*)((uintptr)er + x * esz);
-			printf("	er_write:");
+			data = (uint8*)((uintptr)er + (x * esz));
 			for (y = 0; y < sz; ++y) {
-				printf("[%x]", ((uint8*)p)[y]);
 				data[y] = ((uint8*)p)[y];
 			}
-			printf("\n");
 			/* set valid flag */
 			map[x] = map[x] | 0x80;
-			printf("	map[%x]:%x data:%x\n", x, &map[x], data);
-			printf("	data-re-check:");
-			for (y = 0; y < 6; ++y) {
-				printf("[%x]", data[y]);
-			}
-			printf("\n");
 			return 1;
 		}
 	}
@@ -126,13 +117,10 @@ int er_peek_nbio(ERH *erh, void *p, uint32 *sz, uint8 **mndx) {
 		//printf("[er] <read> checking map[%x]:%x\n", x, map[x]);
 		if (map[x] & 0x80) {
 			/* found entry, now copy out data */
-			data = (uint8*)((uintptr)er + x * esz);
-			printf("	er_read:");
+			data = (uint8*)((uintptr)er + (x * esz));
 			for (y = 0; (y < lsz) && (y < esz); ++y) {
 				((uint8*)p)[y] = data[y];
-				printf("[%x]", data[y]);
 			}
-			printf("\n");
 			/* set pointer to lockmap byte */
 			*sz = y;
 			*mndx = &map[x];

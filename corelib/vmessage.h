@@ -20,7 +20,7 @@ typedef struct _VMESSAGES {
 
 int vmsg_init(VMESSAGES *h);
 int vmsg_disect(void *buf, uint16 *id, uint8 *total, uint8 *index);
-int vmsg_write(CORELIB_LINK *link, void *buf, uint32 bufsz, uint32 esz);
+int vmsg_write(CORELIB_LINK *link, void *buf, uint32 bufsz);
 int vmsg_checkread(VMESSAGES *h, void *buf, uint32 esz, VMESSAGE **out);
 int vmsg_readex(VMESSAGES *h, uint16 id, uint8 total, uint8 index, void *buf, uint32 esz, VMESSAGE **out);
 int vmsg_discard(VMESSAGES *h, VMESSAGE *m);

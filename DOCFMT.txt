@@ -1,0 +1,21 @@
+/* 
+	@group:				<part1>.<part2>...
+	@author:			<name(email)>	
+	@sdescription:		Will write and wait for a reply with a
+						specific request ID.
+	@ldescription:
+						Will block until reply is recieved, and
+						ignore all other messages except for
+						the one it is looking for.
+					
+	@param:erg:			structure representing entry ring
+	@param:out:			pointer to data being written
+	@param:sz:			length of data in bytes
+	@param:rid32ndx		32-bit word offset in reply to check RID
+	@param:rid:			request ID to look for
+	@param:timeout:		the amount of time to wait in seconds before returning
+	@param:>out:		output only argument
+	@param:<in:			input only argument
+	@param:+both:		both input and output
+	@return:			info about return value
+*/

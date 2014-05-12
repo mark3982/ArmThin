@@ -186,6 +186,20 @@ uint32 lh_getnewsignalid() {
 	
 	return x;
 }
+
+/*
+	@description:		Gets extra data for link object.
+*/
+void *lh_getextra(CORELIB_LINK *link) {
+	return link->extra;
+}
+
+/*
+	@sdescription:		Sets extra data for link object.
+*/
+void lh_setextra(CORELIB_LINK *link, void *extra) {
+	link->extra = extra;
+}
 	
 /*
 	@sdescription:		Performs various operations needed to maintain state.
@@ -460,4 +474,176 @@ int lh_tick() {
 	}
 	
 	return 1;
+}
+
+/*
+	@sdescription:			Requests a link to a remote process and thread through the kernel. It will
+							not wait for the reply, but will rather catch it during the tick.
+	@param:rid:				request id
+	@param:rprocess:		remote process
+	@param:rthread:			remote thread
+	@param:proto:			protocol
+	@param:lsignal:			local signal to be used by remote
+	@param:addr:			address of memory chunk to be used
+	@param:pcnt:			page count of memory chunk
+	@param:rxsz:			size of RX		(remote RX)
+	@param:txsz:			size of TX		(remote TX)
+	@param:rxesz:			(if entry based) entry size
+	@param:txesz:			(if entry based) entry size
+*/
+int lh_establishlink(uint32 rprocess, uint32 rthread, uint32 proto, uint32 rxsz, uint32 txsz, uint32 rxesz, uint32 txesz, uint32 rid) {
+	uint32		pkt[12];
+	uint32		lsignal;
+	uint32		addr;
+	uint32		psize;
+	uint32		pcnt;
+	int			res;
+	ERH			erh;
+	
+	
+	printf("	getting lsignal\n");
+	/* come back and fix this */
+	lsignal = lh_getnewsignalid();
+	printf("	got lsignal\n");
+	
+	/* get total memory needed then round up to nearest whole page */
+	pcnt = rxsz + txsz;
+	psize = getpagesize();
+	pcnt = (pcnt / psize) * psize < pcnt ? (pcnt / psize) + 1 : pcnt / psize;
+	/* allocate memory */
+	addr = valloc(pcnt);
+	
+	/*
+		initialize the protocol if needed
+	*/
+	switch (proto) {
+		case IPC_PROTO_ER:
+			/*
+				if we wait to initialize then we might end up 
+				presenting the remote with a bad view and it
+				might read up non-existant packets; so let us
+				try to initiaize it in place with a temporary
+				header that we discard
+			*/
+			er_init(&erh, (void*)(addr + rxsz), rxsz,  rxesz, 0);
+			er_init(&erh, (void*)addr, txsz, txesz, 0);
+			break;
+		default:
+			memset((void*)addr, 0, pcnt * psize);
+			break;
+	}
+	
+	/* build the packet */
+	pkt[0] = KMSG_REQSHARED;
+	pkt[1] = rid;					/* request id */
+	pkt[2] = addr;					/* address of memory */
+	pkt[3] = pcnt;					/* page count */
+	pkt[4] = rprocess;				/* target process */
+	pkt[5] = rthread; 				/* target thread */
+	pkt[6] = lsignal;				/* signal we want used */
+	pkt[7] = proto;					/* protocol to be used */
+	pkt[8] = rxsz;					/* size of rx */
+	pkt[9] = txsz;					/* size of tx */
+	pkt[10] = rxesz;				/* size of rx entry */	
+	pkt[11] = txesz;				/* size of tx entry */
+
+	/* kernel message */
+	res = er_write_nbio(&__corelib_tx, &pkt[0], sizeof(pkt));
+	if (!res) {
+		return res;
+	}
+	
+	/* notify kernel of message */
+	notifykserver();
+	
+	return res;
+	
+	//er_waworr(&__corelib_tx, &__corelib_rx, &pkt[0], 10 * 4, 1, pkt[1], 0);
+	//printf("[lh] got response from kserver type:%x\n", pkt[0]);
+	
+	/* listen for the acceptance/rejection message */
+	//if (!er_worr(&__corelib_rx, &pkt[0], sizeof(pkt), 1, 0x12344321, 0)) {
+	//	printf("[lh] timeout waiting for reply! HALTED\n");
+	//	return 0;
+	//}
+}
+
+/* 
+	@name:				Write And Wait On Request Reply
+	@description:
+						Will block until reply is recieved, and
+						ignore all other messages except for
+						the one it is looking for.
+					
+	@param:erg:			structure representing entry ring
+	@param:out:			pointer to data being written
+	@param:sz:			length of data in bytes
+	@param:rid32ndx		32-bit word offset in reply to check RID
+	@param:rid:			request ID to look for
+	@param:timeout:		the amount of time to wait in seconds before returning
+*/
+int er_worr(ERH *rx, void *out, uint32 sz, uint32 rid32ndx, uint32 rid, uint32 timeout) {
+	uint8			*mndx;
+	uint32			rem;
+
+	rem = timeout;
+	
+	/* wait for reply */
+	while (rem > 0) {
+		while (er_peek_nbio(rx, out, &sz, &mndx)) {
+			/* is this what we are looking for? */
+			printf("[testuelf] GOT PACKET pkt.rid:%x rid:%x\n", ((uint32*)out)[rid32ndx], rid);
+			if (((uint32*)out)[rid32ndx] == rid) {
+				/* deallocate entry */
+				mndx[0] = 0;
+				return 1;
+			}
+		}
+		/* sleep for tick count not seconds */
+		printf("[testuelf] sleeping while waiting for reply\n");
+		rem = sleepticks(timeout);
+	}
+	return 0;
+}
+
+int er_waworr(ERH *tx, ERH *rx, void *out, uint32 sz, uint32 rid32ndx, uint32 rid, uint32 timeout) {
+	uint8			*mndx;
+	uint32			rem;
+	
+	/* try to write it */
+	if (!er_write_nbio(tx, out, sz)) {
+		return 0;
+	}
+	
+	/* alert thread that a message has arrived */
+	if (tx->rproc == 0 && tx->rthread == 0) {
+		/* kthread uses a more efficent signal and wakeup system */
+			
+		notifykserver();
+	} else {
+		/* send a signal then wake up thread incase it is sleeping */
+		signal(tx->rproc, tx->rthread, tx->signal);
+		wakeup(tx->rproc, tx->rthread); 
+	}
+	
+	rem = timeout;
+	
+	printf("	waiting for reply\n");
+	/* wait for reply */
+	while (rem > 0) {
+		while (er_peek_nbio(rx, out, &sz, &mndx)) {
+			/* is this what we are looking for? */
+			printf("	GOT PACKET pkt.rid:%x rid:%x\n", ((uint32*)out)[rid32ndx], rid);
+			if (((uint32*)out)[rid32ndx] == rid) {
+				/* deallocate entry */
+				mndx[0] = 0;
+				return 1;
+			}
+		}
+		/* sleep for tick count not seconds */
+		printf("	sleeping while waiting for reply\n");
+		rem = sleepticks(timeout);
+	}
+	
+	return 0;
 }

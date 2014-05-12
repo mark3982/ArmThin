@@ -220,6 +220,35 @@ int sleep(uint32 timeout) {
 	return result / tps;
 }
 
+int strcmp(char *a, char *b) {
+	for (x = 0; (a[x] != 0) && (b[x] != 0); ++x) {
+		if (a[x] > b[x]) {
+			return 1;
+		}
+		if (b[x] > a[x]) {
+			return -1;
+		}
+	}
+	
+	if (a[x] == b[x]) {
+		return 0;
+	}
+	
+	if (a[x] == 0) {
+		return -1;
+	}
+	
+	return 1;
+}
+
+int strlen(char *str) {
+	int			x;
+	
+	for (x = 0; str[x] != 0; ++x);
+	
+	return x;
+}
+
 uint32 getosticks() {
 	asm("swi %[code]" : : [code]"i" (KSWI_GETOSTICKS));
 }
