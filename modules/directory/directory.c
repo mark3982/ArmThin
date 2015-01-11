@@ -12,8 +12,8 @@ typedef struct _SIMPLENODE {
 	struct _SIMPLENODE	*next;
 	struct _SIMPLENODE	*prev;
 	uint8				*path;
-	uint16				ifscnt;
-	uint16				*ifs;
+	uint32				ifcnt;
+	uint32				*ifs;
 } SIMPLENODE;
 
 static SIMPLENODE		*nodes;
@@ -24,10 +24,12 @@ int main_pktarrived(void *arg, CORELIB_LINK *link) {
 	void				*buf;
 	uint32				sz;
 	uint8				*buf8;
-	uint32				x;
+	uint32				x, y;
 	uint32				avg;
 	uint16				ifcnt;
 	SIMPLENODE			*node;
+	uint32				rid;
+	uint32				*buf32;
 	
 	buf = malloc(link->rxesz);
 	
@@ -40,30 +42,45 @@ int main_pktarrived(void *arg, CORELIB_LINK *link) {
 		if (vmsg_checkread(&vmsgs, buf, link->rxesz, &msg)) {
 			/* we have a v-message */
 			buf8 = (uint8*)msg->buf;
+			buf32 = (uint32*)msg->buf;
 			
 			printf("[directory] got v-msg type:%x\n", buf8[0]);
 			
 			/* check what type of message */
-			switch (buf8[0]) {
+			switch (buf32[0]) {
 				case DIRECTORY_CREATENODE:
+						printf("[directory] got CREATENODE packet\n");
 						/*
 							TODO: check for node already existing
 						*/
 						printf("[directory] adding node\n");
 						node = (SIMPLENODE*)malloc(sizeof(SIMPLENODE));
-						ifcnt = buf8[1];
-						node->ifs = (uint16*)malloc(sizeof(uint16) * ifcnt);
+						/* read interfaces */
+						ifcnt = (uint16)buf32[1];
+						node->ifcnt = ifcnt;
+						node->ifs = (uint32*)malloc(sizeof(uint32) * ifcnt);
 						for (x = 0;	x < ifcnt; ++x) {
-							node->ifs[x] = (buf8[2 + x * 2 + 0] << 8) | buf8[2 + x * 2 + 1];
+							node->ifs[x] = buf32[2];
 							printf("	iface:%x\n", node->ifs[x]);
 						}
-						for (x = 0; (x < msg->size) && (buf8[x + (ifcnt * 2) + 2] != 0); ++x);
-						node->path = (uint8*)malloc(x + 1);
-						for (x = 0; (x < msg->size) && (buf8[x + (ifcnt * 2) + 2] != 0); ++x) {
-							node->path[x] = buf8[x + (ifcnt * 2) + 2];
+						
+						if (buf32[x + 3] + (3 * 4) > msg->size) {
+							/* resource name too large */
+							printf("	res-name too large [%x]\n", buf32[x + 3]);
+							break;
 						}
-						node->path[x] = 0;
+						
+						node->path = (uint8*)malloc(buf32[x + 3]);
+						
+						/* copy path */
+						buf8 = (uint8*)&buf32[3 + ifcnt + 1];
+						for (y = 0; y < buf32[x + 3]; ++y) {
+							node->path[y] = buf8[x];
+						}
+						node->path[y - 1] = 0; 
+						/* null-terminate path */
 						printf("	path:%s\n", node->path); 
+						/* create node */
 						ll_add((void**)&nodes, node);
 					break;
 				case DIRECTORY_QUERYDIR:
@@ -74,21 +91,43 @@ int main_pktarrived(void *arg, CORELIB_LINK *link) {
 					/*
 						send reply with node information
 						
-						process:		0x9823
-						thread:			0x9283
-						interfaces:		0x3452, 0x8273
+						process:		0x9823				(process managing node)
+						thread:			0x9283				(thread managing node)
+						interfaces:		0x3452, 0x8273		(interfaces node supports)
 						
 						the interfaces specify how to talk to
 						the node which is hosted at process:thread
 					*/
-					for (x = 1; (x < msg->size) && (msg->buf[x] != 0); ++x);
+					
+					rid = buf32[1];
+					buf8 = (uint8*)&buf32[3];
+					
+					if (buf32[2] + 3 * 4 >= msg->size) {
+						/* resource-name too large */
+						break;
+					}
+					
+					/* enforce null terminator as part of resource name */
+					buf8[buf32[2] - 1] = 0;
 					
 					for (node = nodes; node; node = node->next) {
-						if (strcmp(node->path, &msg->buf[1]) == 0) {
+						if (strcmp(node->path, buf8) == 0) {
 							/* found the node so now return it's info */
-							
+							buf32[0] = rid;
+							buf32[1] = node->ifcnt;
+							for (x = 0; x < node->ifcnt; ++x) {
+								buf32[2 + x] = node->ifs[x];
+							}
+							break;
 						}
 					}
+					
+					if (!node) {
+						buf32[0] = rid;
+						buf32[1] = 0;
+						break;
+					}
+					
 					break;
 				default:
 					break;

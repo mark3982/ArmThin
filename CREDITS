@@ -13,6 +13,9 @@ from osdev.org
 	Brendan, Combuster
 	
 special thanks:
+	bcos		-	helping with out of order packet replies and
+				in order packet replies; also helped with
+				AMP/SMP/A-SMP design and ideas
 	klang		-	bitmap console font header file (BIG HELP)
 					<also must remember he can help with TrueType>
 	geist		-	helping with:

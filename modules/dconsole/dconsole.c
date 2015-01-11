@@ -52,21 +52,23 @@ int main_linkdropped(void *arg, CORELIB_LINK *link) {
 }
 
 int dir_createnode(CORELIB_LINK *link, uint16 iface, char *path) {
-	uint8		*pkt;
+	uint32		pkt[10];
+	uint8		*pkt8;
 	uint32		x;
 	
-	pkt = (uint8*)malloc(1 + 1 + 2 + strlen(path) + 1);
 	pkt[0] = DIRECTORY_CREATENODE;
 	pkt[1] = 1;
-	pkt[2] = (iface >> 8) & 0xff;
-	pkt[3] = iface & 0xff;
+	pkt[2] = iface;
+	/* account for null-terminator (part of size) */
+	pkt[3] = strlen(path) + 1;
+	printf("[dconsole] strlen(%s):%x\n", path, strlen(path));
+	pkt8 = (uint8*)&pkt[4];
 	for (x = 0; x < strlen(path); ++x) {
-		pkt[4 + x] = path[x];
+		pkt8[x] = path[x];
 	}
-	pkt[4 + x] = 0;
+	pkt8[4 + x] = 0;
 	
 	vmsg_write(link, pkt, 1 + 1 + 2 + strlen(path) + 1);
-	
 	return 1;
 }
 

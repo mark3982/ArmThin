@@ -20,7 +20,7 @@ class bcolors:
     ENDC = '\033[0m'
 	
 def executecmd(cwd, args, cmdshow=True):
-	if cmdshow:
+	if cmdshow or True:
 		print('\t\t[%s] %s' % (cwd, args))
 	args = args.split(' ')
 
@@ -239,7 +239,7 @@ cfg['modules'] = ['testuelf', 'fs']
 cfg['kimg'] = './armos.bin'
 cfg['ldflags'] = ''
 cfg['cmdshow'] = False
-cfg['LIBGCCPATH'] = '/home/kmcguire/opt/cross/lib/gcc/arm-eabi/4.8.2/'
+cfg['LIBGCCPATH'] = '/mnt/host/old/armos/thintest/'
 
 def showHelp():
 		print('%-20sdisplays list of modules' % 'showmodules')

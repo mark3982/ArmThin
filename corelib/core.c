@@ -221,6 +221,8 @@ int sleep(uint32 timeout) {
 }
 
 int strcmp(char *a, char *b) {
+	uint32			x;
+
 	for (x = 0; (a[x] != 0) && (b[x] != 0); ++x) {
 		if (a[x] > b[x]) {
 			return 1;

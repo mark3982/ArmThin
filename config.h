@@ -2,6 +2,9 @@
 #define CONFIG_H
 /*
 	============== CONFIGURATION =============
+
+	These COULD and LIKELY WILL be board specific!
+
 */
 /* the intial kernel stack and the exception stack */
 #define KSTACKSTART 		0x2000		/* descending */

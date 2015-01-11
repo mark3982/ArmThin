@@ -28,7 +28,10 @@ void vfree(uintptr addr, uintptr cnt);
 uintptr valloc(uintptr cnt);
 void *malloc(uint32 size);
 void free(void *ptr);
+
+/* string functions */
 int strlen(char *str);
+int strcmp(char *a, char *b);
 
 /* random */
 int rand();
