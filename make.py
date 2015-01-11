@@ -239,7 +239,7 @@ cfg['modules'] = ['testuelf', 'fs']
 cfg['kimg'] = './armos.bin'
 cfg['ldflags'] = ''
 cfg['cmdshow'] = False
-cfg['LIBGCCPATH'] = '/mnt/host/old/armos/thintest/'
+cfg['LIBGCCPATH'] = '/mnt/host/old/armos/thintest/toolhelp_x86_64'
 
 def showHelp():
 		print('%-20sdisplays list of modules' % 'showmodules')
